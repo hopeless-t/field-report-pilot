@@ -1,0 +1,9 @@
+{
+  "name":"Field REPORT Pilot",
+  "short_name":"Field REPORT",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f3f3ee",
+  "theme_color":"#f7f7f2",
+  "icons":[]
+}

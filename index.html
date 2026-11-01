@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="theme-color" content="#f7f7f2">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Field REPORT">
+  <title>Field REPORT Pilot</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">FIELD REPORT PILOT</p>
+        <h1 id="siteTitle">今日の現場</h1>
+        <p id="siteSubtitle">撮った時に分かっていた意味を、そのまま残す。</p>
+      </div>
+      <div class="hero-actions">
+        <button id="siteButton" class="ghost compact-action">現場を切り替える</button>
+        <button id="reportMetaButton" class="ghost compact-action" type="button">報告書情報</button>
+      </div>
+    </header>
+
+    <section id="startCard" class="start-card">
+      <p class="eyebrow">まずここから</p>
+      <h2>今日の現場を開く</h2>
+      <p>前に使った現場を選ぶか、新しい現場名を入れます。</p>
+      <button id="startSiteButton" class="primary start-primary" type="button">現場を開く</button>
+      <label class="text-escape" for="photoCapture">現場名はあとで、まず撮る</label>
+    </section>
+
+    <section id="placeCard" class="card place-card">
+      <div>
+        <p class="eyebrow">いまどこ？</p>
+        <h2 id="currentPlace">場所未設定</h2>
+        <p id="placeHint">分からなくても撮影は止まりません。</p>
+      </div>
+      <div class="row">
+        <button id="placeButton" class="secondary">場所を選ぶ</button>
+        <button id="moveButton" class="ghost">場所を変える</button>
+      </div>
+    </section>
+
+    <section id="stageCard" class="card stage-card">
+      <div>
+        <p class="eyebrow">いま何を撮る？</p>
+        <h2 id="currentStage">区分未設定</h2>
+        <p id="stageHint">一度選ぶと、次の写真にもそのまま引き継ぎます。変わった時だけ押し直します。</p>
+      </div>
+      <div id="stageChoices" class="stage-grid" aria-label="写真の区分">
+        <button type="button" class="stage-choice" data-stage="施工前">施工前</button>
+        <button type="button" class="stage-choice" data-stage="作業中">作業中</button>
+        <button type="button" class="stage-choice" data-stage="施工後">施工後</button>
+        <button type="button" class="stage-choice" data-stage="確認点">確認点</button>
+      </div>
+    </section>
+
+    <section id="mainCaptureZone" class="capture-zone">
+      <label id="captureLabel" class="capture-button" for="photoCapture">📷 撮影</label>
+      <input id="photoCapture" type="file" accept="image/*" capture="environment" multiple hidden>
+      <label class="secondary upload-button" for="photoImport">写真を選ぶ</label>
+      <input id="photoImport" type="file" accept="image/*" multiple hidden>
+    </section>
+
+    <section id="recordCard" class="card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">今日の記録</p>
+          <h2><span id="photoCount">0</span>枚</h2>
+        </div>
+        <button id="unresolvedButton" class="pill" type="button">未確認 0</button>
+      </div>
+      <div id="photoGrid" class="photo-grid"></div>
+      <p id="emptyPhotos" class="empty">まだ写真はありません。</p>
+      <div class="next-step"><p class="eyebrow">次にやること</p><p id="nextStep">そのまま撮影できます。</p></div>
+    </section>
+
+    <section id="finishZone" class="finish-zone">
+      <button id="finishButton" class="primary">今日の現場を完了する</button>
+      <button id="reportButton" class="secondary">報告を作る</button>
+    </section>
+    <p id="status" class="status global-status" aria-live="polite">準備完了</p>
+    <button id="installHelpButton" class="install-help" type="button">このPilotをホーム画面に置く</button>
+  </main>
+
+  <dialog id="reportDialog" class="report-dialog">
+    <div class="report-shell">
+      <header class="report-toolbar">
+        <button id="closeReportButton" class="ghost" type="button">戻る</button>
+        <div><p class="eyebrow">FIELD REPORT</p><strong>報告プレビュー</strong></div>
+      </header>
+      <div id="reportPreview" class="report-preview"></div>
+      <div class="report-actions">
+        <button id="shareReportButton" class="primary" type="button">共有する</button>
+        <button id="printReportButton" class="secondary" type="button">PDF・プリント</button>
+        <p class="report-hint">まずここで内容を確認できます。ファイルを探しに行く必要はありません。</p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="installDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>ホーム画面に置く</h2><button id="closeInstallButton" type="button" class="ghost">閉じる</button></div>
+      <ol class="install-steps">
+        <li>Safariの共有ボタンを押す</li>
+        <li>「ホーム画面に追加」を選ぶ</li>
+        <li>右上の「追加」を押す</li>
+      </ol>
+      <p class="hint">次からはホーム画面の「Field REPORT」から、そのままアプリのように開けます。</p>
+    </div>
+  </dialog>
+
+  <dialog id="siteDialog">
+    <form method="dialog" class="dialog-body" id="siteForm">
+      <div class="dialog-head"><h2>現場を開く</h2><button value="cancel" class="ghost">閉じる</button></div>
+      <div id="siteList" class="stack"></div>
+      <hr>
+      <label>新しい現場名<input id="newSiteName" autocomplete="off" placeholder="例：六号通り店"></label>
+      <button id="createSiteButton" type="button" class="primary">新しい現場として保存</button>
+    </form>
+  </dialog>
+
+  <dialog id="placeDialog">
+    <form method="dialog" class="dialog-body" id="placeForm">
+      <div class="dialog-head"><h2 id="placeDialogTitle">いまどこ？</h2><button value="cancel" class="ghost">閉じる</button></div>
+      <div id="placeList" class="stack"></div>
+      <hr>
+      <label>階・大きな場所（任意）<input id="newFloorName" autocomplete="off" placeholder="例：1F"></label>
+      <label>場所（任意）<input id="newPlaceName" autocomplete="off" placeholder="例：厨房"></label>
+      <p class="hint">必要になった場所だけ増やします。寸法や図面を先に作る必要はありません。</p>
+      <button id="createPlaceButton" type="button" class="primary">この場所で撮る</button>
+    </form>
+  </dialog>
+
+  <dialog id="finishDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>今日の現場を完了する</h2><button type="button" class="ghost" onclick="this.closest('dialog').close()">閉じる</button></div>
+      <p id="finishSummary"></p>
+      <button id="finishReviewButton" type="button" class="secondary">未確認だけ見る</button>
+      <button id="finishAnywayButton" type="button" class="primary">このまま完了</button>
+    </div>
+  </dialog>
+
+  <dialog id="reportMetaDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>報告書情報</h2><button id="closeReportMetaButton" type="button" class="ghost">閉じる</button></div>
+      <p class="hint">店舗情報と表紙写真は一度保存すれば次回も使います。今回だけ変わる項目だけ直してください。</p>
+      <label>顧客・会社名<input id="reportCustomerCompany" autocomplete="organization" placeholder="例：株式会社〇〇"></label>
+      <label>店舗・現場住所<input id="reportSiteAddress" autocomplete="street-address" placeholder="例：東京都渋谷区…"></label>
+      <label>報告書タイトル<input id="reportTitleInput" value="作業報告書"></label>
+      <label>表紙の店舗外観写真<input id="reportCoverPhoto" type="file" accept="image/*"></label>
+      <div class="cover-photo-preview-wrap"><img id="reportCoverPreview" class="cover-photo-preview" alt="表紙写真プレビュー"><p id="reportCoverStatus" class="hint"></p></div>
+      <label>作業責任者<input id="reportWorkerName" autocomplete="name" placeholder="例：八木 啓之"></label>
+      <label>今回の作業名<input id="reportWorkTitle" placeholder="例：防鼠防虫作業"></label>
+      <label>基本作業<textarea id="reportBasicWork" rows="4" placeholder="定期作業の内容。現場ごとに保存して次回も使います。"></textarea></label>
+      <label>特別報告事項・所見・備考<textarea id="reportSpecialNotes" rows="5" placeholder="実施したこと、できなかった理由、お客様へのお願い等"></textarea></label>
+      <button id="saveReportMetaButton" type="button" class="primary">報告書情報を保存</button>
+    </div>
+  </dialog>
+
+  <dialog id="photoDetailDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>この写真の記録</h2><button id="closePhotoDetailButton" type="button" class="ghost">閉じる</button></div>
+      <label>区分
+        <select id="photoStageSelect">
+          <option value="">未選択</option>
+          <option value="施工前">施工前</option>
+          <option value="作業中">作業中</option>
+          <option value="施工後">施工後</option>
+          <option value="確認点">確認点</option>
+        </select>
+      </label>
+      <div>
+        <p class="eyebrow">ワンタップ文</p>
+        <div id="presetChoices" class="preset-grid">
+          <button type="button" class="preset-choice" data-comment="異常は確認されませんでした">異常なし</button>
+          <button type="button" class="preset-choice" data-comment="喫食はありませんでした">喫食なし</button>
+          <button type="button" class="preset-choice" data-comment="捕獲・目撃はありませんでした">捕獲・目撃なし</button>
+          <button type="button" class="preset-choice" data-comment="侵入痕跡は確認されませんでした">侵入痕跡なし</button>
+        </div>
+      </div>
+      <label>報告文<textarea id="photoCommentInput" rows="4" placeholder="この写真で、何を確認・施工したか"></textarea></label>
+      <button id="savePhotoDetailButton" type="button" class="primary">この写真に保存</button>
+    </div>
+  </dialog>
+
+  <template id="photoTemplate">
+    <article class="photo-item">
+      <img alt="現場写真">
+      <div class="photo-meta">
+        <strong class="photo-stage"></strong>
+        <span class="photo-comment"></span>
+        <strong class="photo-place"></strong>
+        <time class="photo-time"></time>
+        <span class="photo-provenance"></span>
+        <div class="photo-actions">
+          <button type="button" class="photo-detail-action secondary">区分・報告文</button>
+          <button type="button" class="photo-action ghost">場所を付ける</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
