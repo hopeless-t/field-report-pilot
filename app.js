@@ -4,6 +4,26 @@ const DB_VERSION=2;
 const $=s=>document.querySelector(s);
 const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null};
 
+const BUILTIN_PRESETS=[
+ ['異常なし','異常は確認されませんでした'],
+ ['喫食なし','喫食はありませんでした'],
+ ['捕獲・目撃なし','捕獲・目撃はありませんでした'],
+ ['侵入痕跡なし','侵入痕跡は確認されませんでした']
+];
+const STAGE_ORDER=new Map([['施工前',0],['作業中',1],['施工後',2],['確認点',3],['',9]]);
+function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{}}}
+function fastHash(input){let h=2166136261;for(const ch of String(input)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(16).padStart(8,'0')}
+function photoCapability(photo){
+ const place=pathLabel(effectivePlace(photo));const stage=photoStage(photo).trim();const comment=photoComment(photo).trim();const readable=!!imageBlobFromRecord(photo);
+ const provenance=photo.placeSnapshot?'capture':photo.placeResolution?'late':'unknown';
+ const roles=[stage||'stage-unknown',comment?'commented':'comment-missing',readable?'image-readable':'image-missing',provenance];
+ const placement=`${place}|${stage||'未区分'}`;return {hash:fastHash(`${placement}|${roles.join('|')}`),place,stage,roles,placement,readable};
+}
+function placedPhotosForReport(photos){const firstSeen=new Map();photos.forEach((p,i)=>{const place=photoCapability(p).place;if(!firstSeen.has(place))firstSeen.set(place,i)});return photos.slice().sort((a,b)=>{const ca=photoCapability(a),cb=photoCapability(b);const pa=firstSeen.get(ca.place)??9999,pb=firstSeen.get(cb.place)??9999;if(pa!==pb)return pa-pb;const sa=STAGE_ORDER.get(ca.stage)??8,sb=STAGE_ORDER.get(cb.stage)??8;if(sa!==sb)return sa-sb;return String(a.capturedAt).localeCompare(String(b.capturedAt))})}
+async function updateSiteKV(mutator){if(!state.site||state.site.placeholder)return;const next=mutator(siteKV(state.site));state.site={...state.site,kvCache:next,updatedAt:isoNow()};await put('sites',state.site)}
+async function learnComment(comment){const value=String(comment||'').trim();if(!value)return;await updateSiteKV(kv=>({...kv,recentComments:[value,...kv.recentComments.filter(x=>x!==value)].slice(0,8)}))}
+async function learnPlacement(photo){if(!state.site||state.site.placeholder)return;const c=photoCapability(photo);await updateSiteKV(kv=>{const counts={...kv.placementCounts};const byPhoto={...kv.placementByPhoto};const old=byPhoto[photo.id]||'';const next=(c.place==='場所未設定'||!c.stage)?'':c.placement;if(old===next)return kv;if(old){counts[old]=Math.max(0,(counts[old]||1)-1);if(!counts[old])delete counts[old]}if(next){counts[next]=(counts[next]||0)+1;byPhoto[photo.id]=next}else delete byPhoto[photo.id];return {...kv,placementCounts:counts,placementByPhoto:byPhoto}})}
+
 function uuid(){return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}
 function isoNow(){return new Date().toISOString()}
 function localDay(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`}
@@ -66,7 +86,7 @@ async function init(){
 async function ensureWorkingContext(){
  if(state.site && state.visit)return;
  if(!state.site){
-  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,createdAt:isoNow(),updatedAt:isoNow()};
+  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{}},createdAt:isoNow(),updatedAt:isoNow()};
   await put('sites',site);state.site=site;localStorage.setItem('field-report-last-site',site.id);await recordEvent('site_auto_created');
  }
  await startOrResumeVisit(state.site);
@@ -118,7 +138,7 @@ async function createOrNameSite(){
   state.site={...state.site,name,placeholder:false,updatedAt:isoNow()};await put('sites',state.site);await recordEvent('site_named_after_capture',{name});
   $('#newSiteName').value='';$('#siteDialog').close();setStatus(`${name} として現場を保存しました`);render();return;
  }
- const site={id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,createdAt:isoNow(),updatedAt:isoNow()};await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
+ const site={id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{}},createdAt:isoNow(),updatedAt:isoNow()};await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
 }
 
 function releaseCoverPreview(){if(state.coverPreviewURL){URL.revokeObjectURL(state.coverPreviewURL);state.coverPreviewURL=null}}
@@ -127,6 +147,17 @@ function setCoverPreview(source){
  const blob=source instanceof Blob?source:imageBlobFromRecord(source);
  if(blob){state.coverPreviewURL=URL.createObjectURL(blob);img.src=state.coverPreviewURL;img.hidden=false;$('#reportCoverStatus').textContent='この写真を表紙に大きく使います';img.onerror=()=>{img.hidden=true;$('#reportCoverStatus').textContent='表紙写真を読み込めません。報告書は作成できます'}}
  else{img.removeAttribute('src');img.hidden=true;$('#reportCoverStatus').textContent='表紙写真は未設定です'}
+}
+function renderPresetChoices(){
+ const root=$('#presetChoices');if(!root)return;root.innerHTML='';
+ const cached=siteKV().recentComments;const items=[];const seen=new Set();
+ for(const comment of cached){if(seen.has(comment))continue;seen.add(comment);items.push(['前回',comment,'cached'])}
+ for(const [label,comment] of BUILTIN_PRESETS){if(seen.has(comment))continue;seen.add(comment);items.push([label,comment,'builtin'])}
+ for(const [label,comment,kind] of items.slice(0,10)){const b=document.createElement('button');b.type='button';b.className='preset-choice';b.dataset.comment=comment;b.dataset.kind=kind;b.textContent=kind==='cached'?`↻ ${comment}`:label;b.onclick=()=>{$('#photoCommentInput').value=comment};root.append(b)}
+}
+function renderKVHints(){
+ const root=$('#reportKVHints');if(!root)return;root.innerHTML='';const kv=siteKV();const current=$('#reportWorkTitle').value.trim();
+ if(kv.lastWorkTitle&&kv.lastWorkTitle!==current){const b=document.createElement('button');b.type='button';b.className='kv-suggestion';b.textContent=`前回の作業を使う：${kv.lastWorkTitle}`;b.onclick=()=>{$('#reportWorkTitle').value=kv.lastWorkTitle;root.hidden=true};root.append(b);root.hidden=false}else root.hidden=true;
 }
 function openReportMeta(){
  if(!state.site||state.site.placeholder){setStatus('先に現場名を決めてください');return}
@@ -137,7 +168,7 @@ function openReportMeta(){
  $('#reportWorkTitle').value=state.visit?.workTitle||'';
  $('#reportBasicWork').value=state.site.basicWork||'';
  $('#reportSpecialNotes').value=state.visit?.specialNotes||'';
- state.pendingCoverPhoto=null;$('#reportCoverPhoto').value='';setCoverPreview(state.site);
+ state.pendingCoverPhoto=null;$('#reportCoverPhoto').value='';setCoverPreview(state.site);renderKVHints();
  $('#reportMetaDialog').showModal();
 }
 function closeReportMeta(){releaseCoverPreview();state.pendingCoverPhoto=null;$('#reportMetaDialog').close()}
@@ -148,8 +179,8 @@ async function saveReportMeta(){
  let coverFields={};
  if(state.pendingCoverPhoto){const durable=await fileToDurableImage(state.pendingCoverPhoto);coverFields={coverPhotoBytes:durable.bytes,coverPhotoType:durable.type,coverPhotoName:durable.name,coverPhotoBlob:null}}
  state.site={...state.site,customerCompany,address,reportTitle,basicWork,...coverFields,updatedAt:isoNow()};await put('sites',state.site);
- if(state.visit){const workerName=$('#reportWorkerName').value.trim();const workTitle=$('#reportWorkTitle').value.trim();const specialNotes=$('#reportSpecialNotes').value.trim();state.visit={...state.visit,workerName,workTitle,specialNotes};await put('visits',state.visit);if(workerName)localStorage.setItem('field-report-last-worker',workerName)}
- await recordEvent('report_metadata_saved',{hasCover:!!state.site.coverPhotoBlob,hasAddress:!!address,hasWorker:!!state.visit?.workerName});closeReportMeta();setStatus('報告書情報を保存しました。表紙写真は次回も使います');render();
+ if(state.visit){const workerName=$('#reportWorkerName').value.trim();const workTitle=$('#reportWorkTitle').value.trim();const specialNotes=$('#reportSpecialNotes').value.trim();state.visit={...state.visit,workerName,workTitle,specialNotes};await put('visits',state.visit);if(workerName)localStorage.setItem('field-report-last-worker',workerName);if(workTitle)await updateSiteKV(kv=>({...kv,lastWorkTitle:workTitle}))}
+ await recordEvent('report_metadata_saved',{hasCover:!!imageBlobFromRecord(state.site),hasAddress:!!address,hasWorker:!!state.visit?.workerName,kvLastWorkTitle:siteKV().lastWorkTitle||null});closeReportMeta();setStatus('報告書情報を保存しました。表紙・住所・基本作業は次回も使います');render();
 }
 
 function openPlaceDialog(photoId){
@@ -198,14 +229,15 @@ async function applyPlace(place){
 
 function openPhotoDetail(photoId){
  const photo=state.photos.find(p=>p.id===photoId);if(!photo)return;
- state.editingPhotoId=photoId;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);$('#photoDetailDialog').showModal();
+ state.editingPhotoId=photoId;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);renderPresetChoices();$('#photoDetailDialog').showModal();
 }
 async function savePhotoDetail(){
  const index=state.photos.findIndex(p=>p.id===state.editingPhotoId);if(index<0)return;
  const stage=$('#photoStageSelect').value;const comment=$('#photoCommentInput').value.trim();
  const next={...state.photos[index],stage,comment};await put('photos',next);state.photos[index]=next;
  if(stage)state.activeStage=stage;
- await recordEvent('photo_detail_saved',{photoId:next.id,stage,hasComment:!!comment});
+ await learnComment(comment);await learnPlacement(next);const cHash=photoCapability(next).hash;
+ await recordEvent('photo_detail_saved',{photoId:next.id,stage,hasComment:!!comment,cHash});
  $('#photoDetailDialog').close();state.editingPhotoId=null;setStatus('写真の区分と報告文を保存しました');render();
 }
 
@@ -215,7 +247,7 @@ async function captureFiles(files){
  for(const file of [...files]){
   const durable=await fileToDurableImage(file);
   const photo={id:uuid(),visitId:state.visit.id,siteSnapshot:{id:state.site.id,name:state.site.name},placeSnapshot:state.activePlace?{id:state.activePlace.id,path:[...state.activePlace.path]}:null,placeResolution:null,stage:state.activeStage||'',comment:'',capturedAt:isoNow(),name:durable.name,type:durable.type,bytes:durable.bytes};
-  await put('photos',photo);state.photos.push(photo);await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null});
+  await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash});
  }
  $('#photoCapture').value='';$('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render()
 }
@@ -247,16 +279,16 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 async function buildReportHTML(){
  if(!state.site||!state.visit)throw new Error('report context missing');
  const groups=new Map();
- for(const p of state.photos){const label=pathLabel(effectivePlace(p));if(!groups.has(label))groups.set(label,[]);groups.get(label).push(p)}
+ for(const p of placedPhotosForReport(state.photos)){const label=pathLabel(effectivePlace(p));if(!groups.has(label))groups.set(label,[]);groups.get(label).push(p)}
  const sections=[];
  for(const [label,photos] of groups){
   const cards=[];
   for(const p of photos){
    const provenance=p.placeSnapshot?'撮影時に確認':p.placeResolution?'後から確認':'未確認';
    const stage=photoStage(p)||'区分未設定';const comment=photoComment(p)||'報告文未入力';
-   const imageData=await imageRecordToDataURL(p);
+   const capability=photoCapability(p);const imageData=await imageRecordToDataURL(p);
    const imageHTML=imageData?`<img src="${imageData}" alt="現場写真">`:`<div class="report-image-missing">画像を読み込めません<br><small>記録・コメントは保持されています</small></div>`;
-   cards.push(`<article class="report-photo">${imageHTML}<div><p class="report-stage">${esc(stage)}</p><h3>${esc(label)}</h3><p class="report-comment">${esc(comment)}</p><p class="report-provenance">${esc(provenance)} · ${esc(new Date(p.capturedAt).toLocaleString('ja-JP'))}</p></div></article>`)
+   cards.push(`<article class="report-photo" data-chash="${capability.hash}" data-placement="${esc(capability.placement)}">${imageHTML}<div><p class="report-stage">${esc(stage)}</p><h3>${esc(label)}</h3><p class="report-comment">${esc(comment)}</p><p class="report-provenance">${esc(provenance)} · ${esc(new Date(p.capturedAt).toLocaleString('ja-JP'))}</p></div></article>`)
   }
   sections.push(`<section class="report-group"><h2>${esc(label)} <span>${photos.length}枚</span></h2><div class="report-photo-grid">${cards.join('')}</div></section>`)
  }
@@ -354,7 +386,7 @@ function render(){
  $('#unresolvedButton').textContent=state.showUnresolvedOnly?'すべて見る':`未確認 ${unresolved}`;
  $('#unresolvedButton').disabled=!unresolved && !state.showUnresolvedOnly;
  $('#unresolvedButton').classList.toggle('active',state.showUnresolvedOnly);
- const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.slice().reverse().forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
+ const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.slice().reverse().forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
  const completed=!!state.visit?.completedAt;
  $('#finishButton').hidden=completed;
  $('#finishButton').disabled=!state.visit||completed;
@@ -375,14 +407,14 @@ async function runSelfTest(){
  const originalSiteId=state.site.id;state.site={...state.site,name:'SELFTEST現場',placeholder:false,updatedAt:isoNow()};await put('sites',state.site);if(state.site.id!==originalSiteId)throw new Error('site identity changed while naming');
  const place={id:uuid(),path:['1F','厨房'],createdAt:isoNow()};state.site.places.push(place);await put('sites',state.site);state.activePlace=place;state.activeStage='施工前';
  const second=new File([pixel],'selftest-b.png',{type:'image/png'});await captureFiles([second]);if(pathLabel(state.photos[1].placeSnapshot?.path)!=='1F・厨房')throw new Error('semantic capture failed');if(photoStage(state.photos[1])!=='施工前')throw new Error('capture stage inheritance failed');
- openPhotoDetail(state.photos[1].id);$('#photoCommentInput').value='異常は確認されませんでした';await savePhotoDetail();if(photoComment(state.photos[1])!=='異常は確認されませんでした')throw new Error('photo report text save failed');
+ openPhotoDetail(state.photos[1].id);$('#photoCommentInput').value='異常は確認されませんでした';await savePhotoDetail();if(photoComment(state.photos[1])!=='異常は確認されませんでした')throw new Error('photo report text save failed');if(!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV comment cache failed');if(photoCapability(state.photos[1]).hash!==photoCapability(state.photos[1]).hash)throw new Error('cHash unstable');
  // Resolve the first photo later without rewriting capture-time truth.
  await resolvePhotoPlace(state.photos[0].id,place);if(state.photos[0].placeSnapshot!==null||pathLabel(state.photos[0].placeResolution?.path)!=='1F・厨房')throw new Error('late resolution rewrote capture truth');
  state.activePlace=null;const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third]);if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
- const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');
- const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');
+ const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
+ await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
  document.body.dataset.selftest='pass';document.body.dataset.unresolved='1';setStatus('SELFTEST PASS');
 }
 

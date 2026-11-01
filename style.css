@@ -39,3 +39,7 @@ body[data-stage="place"] .capture-zone{grid-template-columns:1fr 1fr}
 
 .photo-item img.image-missing{display:block;background:#ecece6;min-height:180px;object-fit:contain}
 .report-image-missing{display:grid;place-items:center;text-align:center;color:#6b6d65;background:#ecece6;aspect-ratio:4/3;border-radius:10px}
+
+
+/* Shinkenzemi KV cache: cached facts are reused; contextual authority stays explicit. */
+.kv-hints{display:grid;gap:8px}.kv-suggestion{appearance:none;border:1px dashed #9b9d92;border-radius:12px;background:#f5f5ef;padding:11px 12px;text-align:left;font:inherit;font-weight:700;color:#3f413b}.preset-choice[data-kind="cached"]{grid-column:1/-1;text-align:left;background:#f4efe3}
