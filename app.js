@@ -169,8 +169,8 @@ function bind(){
  $('#closeReportMetaButton').onclick=closeReportMeta;
  $('#saveReportMetaButton').onclick=saveReportMeta;
  $('#reportCoverPhoto').onchange=e=>previewCoverPhoto(e.target.files?.[0]||null);
- $('#quickCoverPhoto').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:true});
- $('#coverCapture').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:false});
+ $('#quickCoverPhoto').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:true,source:'library'});
+ $('#coverCapture').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:false,source:'library'});
  document.querySelectorAll('.work-category-choice').forEach(button=>{button.onclick=()=>setWorkCategory(button.dataset.workCategory||'')});
  $('#nextWorkCategoryButton').onclick=advanceWorkCategory;
  document.querySelectorAll('.stage-choice').forEach(button=>{button.onclick=async()=>{state.activeStage=button.dataset.stage||'';if(state.visit){state.visit={...state.visit,currentStage:state.activeStage};await put('visits',state.visit)}recordEvent('capture_stage_selected',{stage:state.activeStage});setStatus(`${state.activeStage} を保持します。変わるまで選び直し不要です`);render()}});
@@ -178,7 +178,6 @@ function bind(){
  $('#moveButton').onclick=()=>clearActivePlace();
  $('#createSiteButton').onclick=createOrNameSite;
  $('#createPlaceButton').onclick=createPlace;
- $('#photoCapture').onchange=e=>captureFiles(e.target.files,{source:'camera'});
  $('#photoImport').onchange=e=>captureFiles(e.target.files,{source:'library'});
  $('#unresolvedButton').onclick=toggleUnresolved;
  $('#finishButton').onclick=requestFinish;
@@ -252,8 +251,8 @@ function openReportMeta(){
 }
 function closeReportMeta(){releaseCoverPreview();state.pendingCoverPhoto=null;$('#reportMetaDialog').close()}
 function previewCoverPhoto(file){state.pendingCoverPhoto=file||null;setCoverPreview(file||state.site)}
-async function saveQuickCover(file,{returnToReport=false}={}){
- if(!file||!state.site)return;const durable=await fileToDurableImage(file);state.site={...state.site,coverPhotoBytes:durable.bytes,coverPhotoType:durable.type,coverPhotoName:durable.name,coverPhotoSource:{reason:returnToReport?'report-cover-picker':'dedicated-cover-camera',at:isoNow()},updatedAt:isoNow()};await put('sites',state.site);$('#quickCoverPhoto').value='';$('#coverCapture').value='';await recordEvent('cover_confirmed',{method:returnToReport?'report-cover-picker':'dedicated-cover-camera'});setStatus('外観写真を表紙として保存しました。作業写真には追加していません');render();if(returnToReport&&state.photos.length)await openReportPreview()
+async function saveQuickCover(file,{returnToReport=false,source='library'}={}){
+ if(!file||!state.site)return;const durable=await fileToDurableImage(file);const reason=returnToReport?'report-cover-picker':'cover-library-picker';state.site={...state.site,coverPhotoBytes:durable.bytes,coverPhotoType:durable.type,coverPhotoName:durable.name,coverPhotoSource:{reason,source,at:isoNow()},updatedAt:isoNow()};await put('sites',state.site);$('#quickCoverPhoto').value='';$('#coverCapture').value='';await recordEvent('cover_confirmed',{method:reason,source});setStatus('外観写真を表紙として保存しました。原本は写真アプリに残っています');render();if(returnToReport&&state.photos.length)await openReportPreview()
 }
 async function saveReportMeta(){
  if(!state.site||state.site.placeholder)return setStatus('現場名を先に決めてください');
@@ -271,7 +270,7 @@ async function setWorkCategory(value){
 async function advanceWorkCategory(){const i=WORK_CATEGORIES.indexOf(state.activeWorkCategory);if(i<0||i>=WORK_CATEGORIES.length-1)return setStatus('特別報告が最後の工程です');await setWorkCategory(WORK_CATEGORIES[i+1])}
 
 async function clearActivePlace(){
- const from=state.activePlace;state.activePlace=null;if(state.visit){state.visit={...state.visit,currentPlaceId:null};await put('visits',state.visit)}await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:null,fromPath:from?.path||null,toPath:null,reason:'explicit-unresolved'});setStatus('場所未設定で撮影できます。区分はそのまま保持しています');render()
+ const from=state.activePlace;state.activePlace=null;if(state.visit){state.visit={...state.visit,currentPlaceId:null};await put('visits',state.visit)}await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:null,fromPath:from?.path||null,toPath:null,reason:'explicit-unresolved'});setStatus('場所未設定のまま、写真アプリから選べます。区分はそのまま保持しています');render()
 }
 function quickPlaceScore(place){const used=Date.parse(place.lastUsedAt||'')||0;let count=0;for(const [key,n] of Object.entries(siteKV().placementCounts)){if(key.startsWith(pathLabel(place.path)+'|'))count+=Number(n)||0}return used+count*1000}
 function renderQuickPlaces(){
@@ -325,7 +324,7 @@ async function selectSite(id){
 async function selectPlace(id){const p=state.site?.places.find(x=>x.id===id);if(p){await applyPlace(p);$('#placeDialog').close();render()}}
 async function applyPlace(place){
  if(state.resolvingPhotoId){await resolvePhotoPlace(state.resolvingPhotoId,place);state.resolvingPhotoId=null;return}
- const from=state.activePlace;const now=isoNow();const idx=state.site?.places.findIndex(p=>p.id===place.id)??-1;const next={...place,lastUsedAt:now};if(idx>=0){state.site.places[idx]=next;state.site.updatedAt=now;await put('sites',state.site)}state.activePlace=next;if(state.visit){state.visit={...state.visit,currentPlaceId:next.id};await put('visits',state.visit)}await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:next.id,fromPath:from?.path||null,toPath:next.path});setStatus(`${pathLabel(next.path)} を保持します。移動した時だけ場所を変えてください`);
+ const from=state.activePlace;const now=isoNow();const idx=state.site?.places.findIndex(p=>p.id===place.id)??-1;const next={...place,lastUsedAt:now};if(idx>=0){state.site.places[idx]=next;state.site.updatedAt=now;await put('sites',state.site)}state.activePlace=next;if(state.visit){state.visit={...state.visit,currentPlaceId:next.id};await put('visits',state.visit)}await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:next.id,fromPath:from?.path||null,toPath:next.path});setStatus(`${pathLabel(next.path)} を保持します。標準カメラで撮影後、写真を選んでください`);
 }
 
 function openPhotoDetail(photoId){
@@ -352,7 +351,7 @@ async function captureFiles(files,{source='unknown'}={}){
   const learned=bestPlacementComment(photo);if(learned)photo={...photo,comment:learned,commentSource:'kv-placement'};
   await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);await maybePromoteCover(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash,commentAutofilled:!!learned});
  }
- $('#photoCapture').value='';$('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render();requestAnimationFrame(()=>document.querySelector('#photoGrid .photo-item:last-child')?.scrollIntoView({behavior:'smooth',block:'nearest'}))
+ $('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render();requestAnimationFrame(()=>document.querySelector('#photoGrid .photo-item:last-child')?.scrollIntoView({behavior:'smooth',block:'nearest'}))
 }
 
 async function resolvePhotoPlace(photoId,place){
@@ -547,7 +546,7 @@ function render(){
  $('#recordCard').hidden=!state.photos.length;
  $('#finishZone').hidden=!state.photos.length;
  $('#siteSubtitle').textContent=stage==='site'?'最初に、今日どこで仕事するかだけ決めます。':state.visit?`${state.visit.workDate} / ${state.visit.completedAt?'完了':'作業中'}`:'撮った時に分かっていた意味を、そのまま残す。';
- const coverCard=$('#coverCaptureCard'),coverThumb=$('#coverCaptureThumb'),coverButton=$('#coverCaptureButton');coverCard.hidden=!hasNamedSite;if(state.coverThumbURL){URL.revokeObjectURL(state.coverThumbURL);state.coverThumbURL=null}const coverBlob=hasNamedSite?imageBlobFromRecord(state.site):null;if(coverBlob){state.coverThumbURL=URL.createObjectURL(coverBlob);coverThumb.src=state.coverThumbURL;coverThumb.hidden=false;coverButton.textContent='外観を撮り直す';$('#coverCaptureTitle').textContent='店舗外観 ✓';$('#coverCaptureHint').textContent='表紙として保存済み。作業写真とは別なので区分・理由は不要です。'}else{coverThumb.removeAttribute('src');coverThumb.hidden=true;coverButton.textContent='🏠 外観を撮る';$('#coverCaptureTitle').textContent='店舗外観';$('#coverCaptureHint').textContent='表紙専用。撮ったらここで完了し、作業写真には追加しません。'}
+ const coverCard=$('#coverCaptureCard'),coverThumb=$('#coverCaptureThumb'),coverButton=$('#coverCaptureButton');coverCard.hidden=!hasNamedSite;if(state.coverThumbURL){URL.revokeObjectURL(state.coverThumbURL);state.coverThumbURL=null}const coverBlob=hasNamedSite?imageBlobFromRecord(state.site):null;if(coverBlob){state.coverThumbURL=URL.createObjectURL(coverBlob);coverThumb.src=state.coverThumbURL;coverThumb.hidden=false;coverButton.textContent='外観を選び直す';$('#coverCaptureTitle').textContent='店舗外観 ✓';$('#coverCaptureHint').textContent='表紙として保存済み。原本は写真アプリにあります。作業写真とは別です。'}else{coverThumb.removeAttribute('src');coverThumb.hidden=true;coverButton.textContent='🏠 外観を選ぶ';$('#coverCaptureTitle').textContent='店舗外観';$('#coverCaptureHint').textContent='iPhone標準カメラで撮影済みの外観を選びます。原本は写真アプリに残ります。'}
  $('#currentPlace').textContent=state.activePlace?pathLabel(state.activePlace.path):'どこで撮る？';
  $('#placeHint').textContent=state.activePlace?'この場所を写真へ記録します。':'分かる範囲だけで大丈夫。分からなくても撮影できます。';
  renderQuickPlaces();
@@ -558,9 +557,7 @@ function render(){
  document.querySelectorAll('.stage-choice').forEach(button=>button.classList.toggle('active',button.dataset.stage===state.activeStage));
  $('#stageHint').textContent=state.activeStage?`${state.activeStage} を次の写真へ引き継ぎます。変わった時だけ押し直します。`:'区分は後からでも付けられます。今分かるなら一度だけ選んでください。';
  $('#moveButton').hidden=true;
- const captureLabel=$('#captureLabel');
- captureLabel.textContent=stage==='place'?'場所未設定で撮影':'📷 撮影';
- captureLabel.classList.toggle('capture-secondary',stage==='place');
+ const safeImportLabel=$('#safeImportLabel');if(safeImportLabel)safeImportLabel.textContent=stage==='place'?'保存済み写真を選ぶ（場所未設定OK）':'写真を選ぶ（原本保存済み）';
  const unresolved=state.photos.filter(isUnresolved).length;
  $('#photoCount').textContent=state.photos.length;
  $('#unresolvedButton').textContent=state.showUnresolvedOnly?'すべて見る':`未確認 ${unresolved}`;
@@ -584,18 +581,18 @@ function setStatus(s){$('#status').textContent=s}
 async function runSelfTest(){
  // Shutter first: no site setup is allowed to block evidence capture.
  if(withSiteSeed({name:'ハイム大川',address:''}).address!=='東京都渋谷区本町6-1-22 ハイム大川103')throw new Error('site KV seed failed');
- const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'camera'});
+ const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'library'});if(state.photos[0].captureSource!=='library')throw new Error('safe import source failed');
  if(!state.site?.placeholder||state.photos.length!==1||!isUnresolved(state.photos[0]))throw new Error('shutter-first failed');
  const originalSiteId=state.site.id;state.site={...state.site,name:'SELFTEST現場',placeholder:false,updatedAt:isoNow()};await put('sites',state.site);if(state.site.id!==originalSiteId)throw new Error('site identity changed while naming');
  const place={id:uuid(),path:['1F','厨房'],createdAt:isoNow()};state.site.places.push(place);await put('sites',state.site);state.activePlace=place;state.activeStage='施工前';
- const second=new File([pixel],'selftest-b.png',{type:'image/png'});await captureFiles([second],{source:'camera'});if(pathLabel(state.photos[1].placeSnapshot?.path)!=='1F・厨房')throw new Error('semantic capture failed');if(photoStage(state.photos[1])!=='施工前')throw new Error('capture stage inheritance failed');
+ const second=new File([pixel],'selftest-b.png',{type:'image/png'});await captureFiles([second],{source:'library'});if(pathLabel(state.photos[1].placeSnapshot?.path)!=='1F・厨房')throw new Error('semantic capture failed');if(photoStage(state.photos[1])!=='施工前')throw new Error('capture stage inheritance failed');
  openPhotoDetail(state.photos[1].id);$('#photoCommentInput').value='異常は確認されませんでした';await savePhotoDetail();if(photoComment(state.photos[1])!=='異常は確認されませんでした')throw new Error('photo report text save failed');if(!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV comment cache failed');if(photoCapability(state.photos[1]).hash!==photoCapability(state.photos[1]).hash)throw new Error('cHash unstable');
  // Resolve the first photo later without rewriting capture-time truth.
  await resolvePhotoPlace(state.photos[0].id,place);if(state.photos[0].placeSnapshot!==null||pathLabel(state.photos[0].placeResolution?.path)!=='1F・厨房')throw new Error('late resolution rewrote capture truth');
- const place2={id:uuid(),path:['1F','シンク'],createdAt:isoNow()};state.site.places.push(place2);await put('sites',state.site);await selectQuickPlace(place2.id);if(pathLabel(state.activePlace?.path)!=='1F・シンク')throw new Error('one-tap place transition failed');await selectQuickPlace(place.id);if(pathLabel(state.activePlace?.path)!=='1F・厨房')throw new Error('one-tap place return failed');await clearActivePlace();await applyPlace(place);state.activeStage='施工前';state.visit={...state.visit,currentStage:'施工前'};await put('visits',state.visit);const sameVisitId=state.visit.id;await startOrResumeVisit(state.site);if(state.visit.id!==sameVisitId||pathLabel(state.activePlace?.path)!=='1F・厨房'||state.activeStage!=='施工前')throw new Error('same-visit context restore failed');await clearActivePlace();const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third],{source:'camera'});if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');const renderedIds=[...document.querySelectorAll('#photoGrid .photo-item')].map(x=>x.dataset.chash);const expectedIds=state.photos.map(p=>photoCapability(p).hash);if(renderedIds.join('|')!==expectedIds.join('|'))throw new Error('photo chronological order failed');$('#photoCommentInput').value='テスト定型文';await saveCurrentCommentAsPreset();if(!siteKV().customPresets.includes('テスト定型文'))throw new Error('custom preset save failed');
+ const place2={id:uuid(),path:['1F','シンク'],createdAt:isoNow()};state.site.places.push(place2);await put('sites',state.site);await selectQuickPlace(place2.id);if(pathLabel(state.activePlace?.path)!=='1F・シンク')throw new Error('one-tap place transition failed');await selectQuickPlace(place.id);if(pathLabel(state.activePlace?.path)!=='1F・厨房')throw new Error('one-tap place return failed');await clearActivePlace();await applyPlace(place);state.activeStage='施工前';state.visit={...state.visit,currentStage:'施工前'};await put('visits',state.visit);const sameVisitId=state.visit.id;await startOrResumeVisit(state.site);if(state.visit.id!==sameVisitId||pathLabel(state.activePlace?.path)!=='1F・厨房'||state.activeStage!=='施工前')throw new Error('same-visit context restore failed');await clearActivePlace();const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third],{source:'library'});if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');const renderedIds=[...document.querySelectorAll('#photoGrid .photo-item')].map(x=>x.dataset.chash);const expectedIds=state.photos.map(p=>photoCapability(p).hash);if(renderedIds.join('|')!==expectedIds.join('|'))throw new Error('photo chronological order failed');$('#photoCommentInput').value='テスト定型文';await saveCurrentCommentAsPreset();if(!siteKV().customPresets.includes('テスト定型文'))throw new Error('custom preset save failed');
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
- const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');if(capturedPhotoFiles().length!==2)throw new Error('photo library bundle failed');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
+ const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');if(capturedPhotoFiles().length!==0)throw new Error('library originals should not be duplicated');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
  state.activeStage='作業中';state.activeWorkCategory='ネズミ粉剤';state.visit={...state.visit,currentStage:'作業中',currentWorkCategory:'ネズミ粉剤'};await put('visits',state.visit);await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await requestFinish();if($('#finishDialog').open)throw new Error('finish dialog blocked mid-work completion');if(!state.visit.completedAt)throw new Error('completion failed');if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');if($('#reportPreview').querySelectorAll('.report-photo-edit').length!==3||!$('#reportPreview').querySelector('.report-meta-edit-inline'))throw new Error('report in-app edit controls missing');const sectionLabels=[...$('#reportPreview').querySelectorAll('.report-work-section>h2')].map(x=>x.textContent);if(sectionLabels[0]!=='1. ゴキブリトラップ')throw new Error('report work order failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');const editable=await generateEditableHTMLFile();const editableText=await editable.text();if(!editable.type.startsWith('text/html')||editable.size<1000||!editable.name.endsWith('-PC編集.html')||!editableText.includes('Field REPORT｜PC編集モード')||!editableText.includes('saveEditedHTMLButton')||!editableText.includes('pcPrintButton')||!editableText.includes('replaceImage')||!editableText.includes('data:image/'))throw new Error('editable HTML bundle failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['ゴキブリトラップ|1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
  document.body.dataset.selftest='pass';document.body.dataset.unresolved='1';setStatus('SELFTEST PASS');
 }

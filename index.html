@@ -32,7 +32,7 @@
       <h2>今日の現場を開く</h2>
       <p>前に使った現場を選ぶか、新しい現場名を入れます。</p>
       <button id="startSiteButton" class="primary start-primary" type="button">現場を開く</button>
-      <label class="text-escape" for="photoCapture">現場名はあとで、まず撮る</label>
+      <label class="text-escape" for="photoImport">現場名はあとでOK。保存済みの写真を選ぶ</label>
     </section>
 
     <section id="coverCaptureCard" class="card cover-capture-card" hidden>
@@ -43,8 +43,8 @@
       </div>
       <div class="cover-capture-row">
         <img id="coverCaptureThumb" class="cover-capture-thumb" alt="表紙の店舗外観" hidden>
-        <label id="coverCaptureButton" class="secondary cover-capture-button" for="coverCapture">🏠 外観を撮る</label>
-        <input id="coverCapture" type="file" accept="image/*" capture="environment" hidden>
+        <label id="coverCaptureButton" class="secondary cover-capture-button" for="coverCapture">🏠 外観を選ぶ</label>
+        <input id="coverCapture" type="file" accept="image/*" hidden>
       </div>
     </section>
 
@@ -91,10 +91,12 @@
       </div>
     </section>
 
-    <section id="mainCaptureZone" class="capture-zone">
-      <label id="captureLabel" class="capture-button" for="photoCapture">📷 撮影</label>
-      <input id="photoCapture" type="file" accept="image/*" capture="environment" multiple hidden>
-      <label class="secondary upload-button" for="photoImport">写真を選ぶ</label>
+    <section id="mainCaptureZone" class="capture-zone safe-capture-zone">
+      <div class="safe-capture-copy">
+        <strong>原本を失わない撮影</strong>
+        <span>① iPhone標準カメラで撮影 → ② ここで写真を選ぶ</span>
+      </div>
+      <label id="safeImportLabel" class="capture-button safe-import-button" for="photoImport">写真を選ぶ（原本保存済み）</label>
       <input id="photoImport" type="file" accept="image/*" multiple hidden>
     </section>
 
@@ -205,11 +207,11 @@
       <div class="dialog-head"><h2>使い方</h2><button id="closeHelpButton" type="button" class="ghost">閉じる</button></div>
       <ol class="usage-steps">
         <li><strong>現場を開く</strong>：前に使った現場なら選ぶだけ。</li>
-        <li><strong>店舗外観</strong>：表紙写真が無い時だけ「🏠 外観を撮る」。これは作業写真に入りません。</li>
+        <li><strong>店舗外観</strong>：iPhone標準カメラで外観を撮ってから「🏠 外観を選ぶ」。原本は写真アプリに残り、これは作業写真には入りません。</li>
         <li><strong>施工工程</strong>：ゴキブリトラップ→ネズミ固形剤→ネズミ粉剤→衛生管理報告→特別報告の固定順。「次の施工へ」を1回押すだけ。</li>
         <li><strong>場所</strong>：最初に1回選ぶ。移動するまでその場所を保持します。</li>
         <li><strong>施工前・作業中・施工後</strong>：最初に1回選ぶ。変わった時だけ押し直します。</li>
-        <li><strong>撮影</strong>：写真は古い順に上、新しい写真ほど下へ追加されます。</li>
+        <li><strong>撮影</strong>：必ずiPhone標準カメラで先に撮影し、写真アプリに原本を残してから「写真を選ぶ（原本保存済み）」で取り込みます。写真は古い順に上、新しい写真ほど下へ追加されます。</li>
         <li><strong>定型文</strong>：写真の「定型文・報告文を編集」→ワンタップ文を選ぶ。自由入力した文は「この文を定型文として保存」で次回から1タップ。</li>
         <li><strong>完了</strong>：「今日の現場を完了する」を押すと、施工工程や区分が途中でも止めずに完了→報告プレビューへ進みます。未入力は報告側で後から直せます。</li>
         <li><strong>PCでじっくり修正</strong>：「PCで編集（HTML）」を共有します。写真込みの1ファイルなので、PCのブラウザで開いて文章を直接編集し、編集済みHTML保存またはPDF/印刷ができます。</li>
@@ -276,7 +278,7 @@
     </article>
   </template>
 
-  <input id="quickCoverPhoto" type="file" accept="image/*" capture="environment" hidden>
+  <input id="quickCoverPhoto" type="file" accept="image/*" hidden>
   <script src="app.js" defer></script>
 </body>
 </html>

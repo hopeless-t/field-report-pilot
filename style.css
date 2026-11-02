@@ -65,3 +65,5 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 #shareEditableHTMLButton{background:#eef3e8;border-color:#b7c4a3}.report-actions #shareEditableHTMLButton{font-weight:850}
 
 #savePhotosButton{background:#eef5ff;border-color:#b8c9df;font-weight:850}
+
+.safe-capture-zone{grid-template-columns:1fr}.safe-capture-copy{display:grid;gap:4px;padding:2px 2px 4px}.safe-capture-copy strong{font-size:15px}.safe-capture-copy span{font-size:12px;color:#6b6d65}.safe-import-button{display:flex;align-items:center;justify-content:center;text-align:center}
