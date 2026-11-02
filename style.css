@@ -67,3 +67,5 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 #savePhotosButton{background:#eef5ff;border-color:#b8c9df;font-weight:850}
 
 .safe-capture-zone{grid-template-columns:1fr}.safe-capture-copy{display:grid;gap:4px;padding:2px 2px 4px}.safe-capture-copy strong{font-size:15px}.safe-capture-copy span{font-size:12px;color:#6b6d65}.safe-import-button{display:flex;align-items:center;justify-content:center;text-align:center}
+
+.manual-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}.manual-cta{display:block;margin-top:14px;padding:12px 14px;border-radius:12px;background:#171815;color:#fff;text-align:center;text-decoration:none;font-weight:800}
