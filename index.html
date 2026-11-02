@@ -96,8 +96,9 @@
       </header>
       <div id="reportPreview" class="report-preview"></div>
       <div class="report-actions">
-        <button id="shareReportButton" class="primary" type="button">共有する</button>
-        <button id="printReportButton" class="secondary" type="button">PDF・プリント</button>
+        <button id="shareReportButton" class="primary" type="button">PDFを共有</button>
+        <button id="printReportButton" class="secondary" type="button">PDFを保存</button>
+        <button id="printOnlyButton" class="ghost" type="button">プリント</button>
         <p class="report-hint">まずここで内容を確認できます。ファイルを探しに行く必要はありません。</p>
       </div>
     </div>
@@ -186,6 +187,7 @@
         </div>
       </div>
       <label>報告文<textarea id="photoCommentInput" rows="4" placeholder="この写真で、何を確認・施工したか"></textarea></label>
+      <button id="makeCoverButton" type="button" class="secondary">この写真を表紙にする</button>
       <button id="savePhotoDetailButton" type="button" class="primary">この写真に保存</button>
     </div>
   </dialog>
@@ -202,11 +204,13 @@
         <div class="photo-actions">
           <button type="button" class="photo-detail-action secondary">区分・報告文</button>
           <button type="button" class="photo-action ghost">場所を付ける</button>
+          <button type="button" class="photo-cover-action ghost">表紙</button>
         </div>
       </div>
     </article>
   </template>
 
+  <input id="quickCoverPhoto" type="file" accept="image/*" hidden>
   <script src="app.js" defer></script>
 </body>
 </html>

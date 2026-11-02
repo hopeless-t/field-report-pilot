@@ -11,7 +11,13 @@ const BUILTIN_PRESETS=[
  ['侵入痕跡なし','侵入痕跡は確認されませんでした']
 ];
 const STAGE_ORDER=new Map([['施工前',0],['作業中',1],['施工後',2],['確認点',3],['',9]]);
-function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{}}}
+const SITE_SEEDS=[
+ {match:/^ハイム大川(?:103)?$/,address:'東京都渋谷区本町6-1-22 ハイム大川103'}
+];
+function seedForSiteName(name){return SITE_SEEDS.find(x=>x.match.test(String(name||'').trim()))||null}
+function withSiteSeed(site){const seed=seedForSiteName(site?.name);if(!seed)return site;return {...site,address:site.address||seed.address,seedSource:site.seedSource||'known-site-kv'}}
+function isCoverCandidate(photo){const place=pathLabel(effectivePlace(photo));return /(店舗?外観|建物外観|外観|正面|ファサード|エントランス外)/.test(place)}
+function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{},commentsByPlacement:kv.commentsByPlacement&&typeof kv.commentsByPlacement==='object'?kv.commentsByPlacement:{}}}
 function fastHash(input){let h=2166136261;for(const ch of String(input)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(16).padStart(8,'0')}
 function photoCapability(photo){
  const place=pathLabel(effectivePlace(photo));const stage=photoStage(photo).trim();const comment=photoComment(photo).trim();const readable=!!imageBlobFromRecord(photo);
@@ -23,6 +29,39 @@ function placedPhotosForReport(photos){const firstSeen=new Map();photos.forEach(
 async function updateSiteKV(mutator){if(!state.site||state.site.placeholder)return;const next=mutator(siteKV(state.site));state.site={...state.site,kvCache:next,updatedAt:isoNow()};await put('sites',state.site)}
 async function learnComment(comment){const value=String(comment||'').trim();if(!value)return;await updateSiteKV(kv=>({...kv,recentComments:[value,...kv.recentComments.filter(x=>x!==value)].slice(0,8)}))}
 async function learnPlacement(photo){if(!state.site||state.site.placeholder)return;const c=photoCapability(photo);await updateSiteKV(kv=>{const counts={...kv.placementCounts};const byPhoto={...kv.placementByPhoto};const old=byPhoto[photo.id]||'';const next=(c.place==='場所未設定'||!c.stage)?'':c.placement;if(old===next)return kv;if(old){counts[old]=Math.max(0,(counts[old]||1)-1);if(!counts[old])delete counts[old]}if(next){counts[next]=(counts[next]||0)+1;byPhoto[photo.id]=next}else delete byPhoto[photo.id];return {...kv,placementCounts:counts,placementByPhoto:byPhoto}})}
+async function learnCommentForPlacement(photo,comment){
+ const value=String(comment||'').trim();const c=photoCapability({...photo,comment:value});if(!value||c.place==='場所未設定'||!c.stage)return;
+ await updateSiteKV(kv=>{const map={...kv.commentsByPlacement};const list=Array.isArray(map[c.placement])?[...map[c.placement]]:[];if(!list.includes(value))list.unshift(value);map[c.placement]=list.slice(0,6);return {...kv,commentsByPlacement:map}})
+}
+function bestPlacementComment(photo){const c=photoCapability(photo);if(c.place==='場所未設定'||!c.stage)return '';const list=siteKV().commentsByPlacement[c.placement];return Array.isArray(list)&&list.length===1?String(list[0]||''):''}
+async function maybePromoteCover(photo,reason='cHash-cover'){
+ if(!state.site||state.site.placeholder||imageBlobFromRecord(state.site)||!isCoverCandidate(photo))return false;
+ const bytes=bytesFromRecord(photo.bytes||photo.imageBytes);if(!bytes?.byteLength)return false;
+ state.site={...state.site,coverPhotoBytes:bytes,coverPhotoType:photo.type||'image/jpeg',coverPhotoName:photo.name||'storefront.jpg',coverPhotoSource:{photoId:photo.id,reason,at:isoNow()},updatedAt:isoNow()};await put('sites',state.site);await recordEvent('cover_auto_promoted',{photoId:photo.id,reason});return true
+}
+async function confirmCoverPhoto(photoId,closeDialog=false){
+ const photo=state.photos.find(p=>p.id===photoId);if(!photo)return;
+ const bytes=bytesFromRecord(photo.bytes||photo.imageBytes);if(!bytes?.byteLength)return setStatus('この写真の画像データを読み込めません');
+ state.site={...state.site,coverPhotoBytes:bytes,coverPhotoType:photo.type||'image/jpeg',coverPhotoName:photo.name||'storefront.jpg',coverPhotoSource:{photoId:photo.id,reason:'user-confirmed',at:isoNow()},updatedAt:isoNow()};await put('sites',state.site);await recordEvent('cover_confirmed',{photoId:photo.id});setStatus('この写真を表紙として記憶しました。次回から自動で使います');if(closeDialog&&$('#photoDetailDialog').open)$('#photoDetailDialog').close();render()
+}
+async function setCoverFromPhoto(){return confirmCoverPhoto(state.editingPhotoId,true)}
+async function applySafeKVCoverage(){
+ let stageFilled=0,commentFilled=0,coverFilled=0;
+ const photos=state.photos.slice().sort((a,b)=>String(a.capturedAt).localeCompare(String(b.capturedAt)));
+ for(let i=0;i<photos.length;i++){
+  let p=photos[i];if(photoStage(p).trim())continue;const place=pathLabel(effectivePlace(p));if(place==='場所未設定')continue;
+  let before=null,after=null;
+  for(let j=i-1;j>=0;j--){if(pathLabel(effectivePlace(photos[j]))===place&&photoStage(photos[j]).trim()){before=photoStage(photos[j]).trim();break}}
+  for(let j=i+1;j<photos.length;j++){if(pathLabel(effectivePlace(photos[j]))===place&&photoStage(photos[j]).trim()){after=photoStage(photos[j]).trim();break}}
+  if(before&&before===after){p={...p,stage:before,stageSource:'bounded-neighbor'};await put('photos',p);photos[i]=p;const idx=state.photos.findIndex(x=>x.id===p.id);if(idx>=0)state.photos[idx]=p;await learnPlacement(p);stageFilled++}
+ }
+ for(let i=0;i<state.photos.length;i++){
+  let p=state.photos[i];if(!photoComment(p).trim()){const learned=bestPlacementComment(p);if(learned){p={...p,comment:learned,commentSource:'kv-placement'};await put('photos',p);state.photos[i]=p;commentFilled++}}
+  if(await maybePromoteCover(state.photos[i]))coverFilled++;
+ }
+ if(stageFilled||commentFilled||coverFilled)await recordEvent('safe_kv_coverage',{stageFilled,commentFilled,coverFilled});
+ return {stageFilled,commentFilled,coverFilled}
+}
 
 function uuid(){return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}
 function isoNow(){return new Date().toISOString()}
@@ -86,14 +125,14 @@ async function init(){
 async function ensureWorkingContext(){
  if(state.site && state.visit)return;
  if(!state.site){
-  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{}},createdAt:isoNow(),updatedAt:isoNow()};
+  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{}},createdAt:isoNow(),updatedAt:isoNow()};
   await put('sites',site);state.site=site;localStorage.setItem('field-report-last-site',site.id);await recordEvent('site_auto_created');
  }
  await startOrResumeVisit(state.site);
 }
 
 async function startOrResumeVisit(site){
- state.site=site; localStorage.setItem('field-report-last-site',site.id);
+ site=withSiteSeed(site);await put('sites',site);state.site=site; localStorage.setItem('field-report-last-site',site.id);
  const visits=(await getAll('visits')).filter(v=>v.siteId===site.id).sort((a,b)=>b.startedAt.localeCompare(a.startedAt));
  let v=visits.find(v=>!v.completedAt && v.workDate===localDay());
  if(!v){v={id:uuid(),siteId:site.id,workDate:localDay(),workerName:localStorage.getItem('field-report-last-worker')||'',workTitle:'',specialNotes:'',startedAt:isoNow(),completedAt:null};await put('visits',v);state.visit=v;await recordEvent('visit_started')}else state.visit=v;
@@ -110,6 +149,7 @@ function bind(){
  $('#closeReportMetaButton').onclick=closeReportMeta;
  $('#saveReportMetaButton').onclick=saveReportMeta;
  $('#reportCoverPhoto').onchange=e=>previewCoverPhoto(e.target.files?.[0]||null);
+ $('#quickCoverPhoto').onchange=e=>saveQuickCover(e.target.files?.[0]||null);
  document.querySelectorAll('.stage-choice').forEach(button=>{button.onclick=()=>{state.activeStage=button.dataset.stage||'';recordEvent('capture_stage_selected',{stage:state.activeStage});setStatus(`${state.activeStage} として次の写真を記録します`);render()}});
  $('#placeButton').onclick=()=>openPlaceDialog(null);
  $('#moveButton').onclick=()=>{state.activePlace=null;recordEvent('place_boundary',{reason:'explicit_move'});setStatus('場所を解除しました。次の場所を選ぶまで写真は「場所未設定」で残ります');render()};
@@ -120,25 +160,27 @@ function bind(){
  $('#unresolvedButton').onclick=toggleUnresolved;
  $('#finishButton').onclick=requestFinish;
  $('#finishReviewButton').onclick=()=>{state.showUnresolvedOnly=true;$('#finishDialog').close();render();document.querySelector('#photoGrid')?.scrollIntoView({behavior:'smooth',block:'start'})};
- $('#finishAnywayButton').onclick=()=>{$('#finishDialog').close();finishVisit()};
+ $('#finishAnywayButton').onclick=async()=>{$('#finishDialog').close();await finishVisit();await openReportPreview()};
  $('#reportButton').onclick=openReportPreview;
  $('#closeReportButton').onclick=()=>$('#reportDialog').close();
  $('#shareReportButton').onclick=shareReport;
- $('#printReportButton').onclick=()=>window.print();
+ $('#printReportButton').onclick=savePDFReport;
+ $('#printOnlyButton').onclick=()=>window.print();
  $('#installHelpButton').onclick=()=>$('#installDialog').showModal();
  $('#closeInstallButton').onclick=()=>$('#installDialog').close();
  $('#closePhotoDetailButton').onclick=()=>$('#photoDetailDialog').close();
  $('#savePhotoDetailButton').onclick=savePhotoDetail;
+ $('#makeCoverButton').onclick=setCoverFromPhoto;
  document.querySelectorAll('.preset-choice').forEach(button=>{button.onclick=()=>{$('#photoCommentInput').value=button.dataset.comment||''}});
 }
 
 async function createOrNameSite(){
  const name=$('#newSiteName').value.trim(); if(!name)return setStatus('現場名を入力してください');
  if(state.site?.placeholder && state.visit){
-  state.site={...state.site,name,placeholder:false,updatedAt:isoNow()};await put('sites',state.site);await recordEvent('site_named_after_capture',{name});
+  state.site=withSiteSeed({...state.site,name,placeholder:false,updatedAt:isoNow()});await put('sites',state.site);await recordEvent('site_named_after_capture',{name});
   $('#newSiteName').value='';$('#siteDialog').close();setStatus(`${name} として現場を保存しました`);render();return;
  }
- const site={id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{}},createdAt:isoNow(),updatedAt:isoNow()};await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
+ const site=withSiteSeed({id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{}},createdAt:isoNow(),updatedAt:isoNow()});await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
 }
 
 function releaseCoverPreview(){if(state.coverPreviewURL){URL.revokeObjectURL(state.coverPreviewURL);state.coverPreviewURL=null}}
@@ -173,6 +215,9 @@ function openReportMeta(){
 }
 function closeReportMeta(){releaseCoverPreview();state.pendingCoverPhoto=null;$('#reportMetaDialog').close()}
 function previewCoverPhoto(file){state.pendingCoverPhoto=file||null;setCoverPreview(file||state.site)}
+async function saveQuickCover(file){
+ if(!file||!state.site)return;const durable=await fileToDurableImage(file);state.site={...state.site,coverPhotoBytes:durable.bytes,coverPhotoType:durable.type,coverPhotoName:durable.name,coverPhotoSource:{reason:'quick-picker',at:isoNow()},updatedAt:isoNow()};await put('sites',state.site);$('#quickCoverPhoto').value='';await recordEvent('cover_confirmed',{method:'quick-picker'});setStatus('外観写真をこの現場の表紙として記憶しました');await openReportPreview()
+}
 async function saveReportMeta(){
  if(!state.site||state.site.placeholder)return setStatus('現場名を先に決めてください');
  const customerCompany=$('#reportCustomerCompany').value.trim();const address=$('#reportSiteAddress').value.trim();const reportTitle=$('#reportTitleInput').value.trim()||'作業報告書';const basicWork=$('#reportBasicWork').value.trim();
@@ -229,16 +274,16 @@ async function applyPlace(place){
 
 function openPhotoDetail(photoId){
  const photo=state.photos.find(p=>p.id===photoId);if(!photo)return;
- state.editingPhotoId=photoId;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);renderPresetChoices();$('#photoDetailDialog').showModal();
+ state.editingPhotoId=photoId;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);renderPresetChoices();$('#makeCoverButton').hidden=!imageBlobFromRecord(photo);$('#photoDetailDialog').showModal();
 }
 async function savePhotoDetail(){
  const index=state.photos.findIndex(p=>p.id===state.editingPhotoId);if(index<0)return;
  const stage=$('#photoStageSelect').value;const comment=$('#photoCommentInput').value.trim();
  const next={...state.photos[index],stage,comment};await put('photos',next);state.photos[index]=next;
  if(stage)state.activeStage=stage;
- await learnComment(comment);await learnPlacement(next);const cHash=photoCapability(next).hash;
+ await learnComment(comment);await learnCommentForPlacement(next,comment);await learnPlacement(next);await maybePromoteCover(next);const cHash=photoCapability(next).hash;
  await recordEvent('photo_detail_saved',{photoId:next.id,stage,hasComment:!!comment,cHash});
- $('#photoDetailDialog').close();state.editingPhotoId=null;setStatus('写真の区分と報告文を保存しました');render();
+ $('#photoDetailDialog').close();state.editingPhotoId=null;const filled=await applySafeKVCoverage();const auto=filled.stageFilled+filled.commentFilled+filled.coverFilled;setStatus(auto?`写真を保存し、同じ文脈 ${auto}件も安全に自動補完しました`:'写真の区分と報告文を保存しました');render();
 }
 
 async function captureFiles(files){
@@ -246,8 +291,9 @@ async function captureFiles(files){
  await ensureWorkingContext();
  for(const file of [...files]){
   const durable=await fileToDurableImage(file);
-  const photo={id:uuid(),visitId:state.visit.id,siteSnapshot:{id:state.site.id,name:state.site.name},placeSnapshot:state.activePlace?{id:state.activePlace.id,path:[...state.activePlace.path]}:null,placeResolution:null,stage:state.activeStage||'',comment:'',capturedAt:isoNow(),name:durable.name,type:durable.type,bytes:durable.bytes};
-  await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash});
+  let photo={id:uuid(),visitId:state.visit.id,siteSnapshot:{id:state.site.id,name:state.site.name},placeSnapshot:state.activePlace?{id:state.activePlace.id,path:[...state.activePlace.path]}:null,placeResolution:null,stage:state.activeStage||'',comment:'',capturedAt:isoNow(),name:durable.name,type:durable.type,bytes:durable.bytes};
+  const learned=bestPlacementComment(photo);if(learned)photo={...photo,comment:learned,commentSource:'kv-placement'};
+  await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);await maybePromoteCover(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash,commentAutofilled:!!learned});
  }
  $('#photoCapture').value='';$('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render()
 }
@@ -256,18 +302,20 @@ async function resolvePhotoPlace(photoId,place){
  const index=state.photos.findIndex(p=>p.id===photoId);if(index<0)return;
  const photo=state.photos[index];if(!isUnresolved(photo))return;
  const resolvedAt=isoNow();const ageMs=Math.max(0,new Date(resolvedAt)-new Date(photo.capturedAt));
- const next={...photo,placeResolution:{id:place.id,path:[...place.path],resolvedAt}};await put('photos',next);state.photos[index]=next;
+ const next={...photo,placeResolution:{id:place.id,path:[...place.path],resolvedAt}};await put('photos',next);state.photos[index]=next;await learnPlacement(next);await maybePromoteCover(next,'late-place-cHash');
  await recordEvent('photo_late_resolved',{photoId,placeId:place.id,ageMs});setStatus(`写真の場所を ${pathLabel(place.path)} と確認しました。撮影時未確認の履歴は保持しています`);
 }
 
 function toggleUnresolved(){state.showUnresolvedOnly=!state.showUnresolvedOnly;render()}
-function requestFinish(){
+async function requestFinish(){
  if(!state.visit)return setStatus('まず撮影できます。現場名はあとで決められます');
+ setStatus('最後の再入力を増やさないよう、既知の文脈だけ自動補完しています…');const filled=await applySafeKVCoverage();render();
  const unresolved=state.photos.filter(isUnresolved).length;
  const missingDetail=state.photos.filter(needsReportDetail).length;
- if(!unresolved&&!missingDetail)return finishVisit();
- const parts=[];if(unresolved)parts.push(`場所未確認 ${unresolved}枚`);if(missingDetail)parts.push(`区分・報告文の未入力 ${missingDetail}枚`);
- $('#finishSummary').textContent=`写真 ${state.photos.length}枚。${parts.join('、')}があります。写真は消さず、このまま完了もできます。`;
+ if(!unresolved&&!missingDetail){await finishVisit();return openReportPreview()}
+ const parts=[];if(unresolved)parts.push(`場所未確認 ${unresolved}枚`);if(missingDetail)parts.push(`安全に確定できない区分・報告文 ${missingDetail}枚`);
+ const auto=filled.stageFilled+filled.commentFilled+filled.coverFilled;
+ $('#finishSummary').textContent=`写真 ${state.photos.length}枚。${auto?`既知文脈から ${auto}件を自動補完しました。`:''}${parts.join('、')}は推測せず保持します。このまま完了すると、そのまま報告を開きます。`;
  $('#finishReviewButton').hidden=!unresolved;
  $('#finishReviewButton').textContent=unresolved?`場所未確認 ${unresolved}枚だけ見る`:'未確認だけ見る';
  $('#finishDialog').showModal();
@@ -295,7 +343,7 @@ async function buildReportHTML(){
  const displayName=state.site.placeholder?'現場未設定':state.site.name;
  const unresolved=state.photos.filter(isUnresolved).length;
  const coverData=await imageRecordToDataURL(state.site);
- const coverImage=coverData?`<img class="report-cover-image" src="${coverData}" alt="${esc(displayName)} 店舗外観">`:`<div class="report-cover-missing">店舗外観写真 未設定</div>`;
+ const coverImage=coverData?`<img class="report-cover-image" src="${coverData}" alt="${esc(displayName)} 店舗外観">`:`<button type="button" id="quickCoverButton" class="report-cover-missing">店舗外観写真 未設定<br><small>タップして写真から入れる（次回から自動）</small></button>`;
  const customer=state.site.customerCompany||'';const address=state.site.address||'';const reportTitle=state.site.reportTitle||'作業報告書';const worker=state.visit.workerName||'';const workTitle=state.visit.workTitle||'';const basicWork=state.site.basicWork||'';const specialNotes=state.visit.specialNotes||'';
  const cover=`<section class="report-cover"><p class="report-cover-kicker">${esc(reportTitle)}</p><h1>${esc(displayName)}</h1>${address?`<p class="report-cover-address">${esc(address)}</p>`:''}${coverImage}<dl class="report-cover-meta"><div><dt>施工日時</dt><dd>${esc(state.visit.workDate)}</dd></div><div><dt>作業責任者</dt><dd>${esc(worker||'未入力')}</dd></div>${customer?`<div><dt>顧客・会社名</dt><dd>${esc(customer)}</dd></div>`:''}${workTitle?`<div><dt>今回の作業</dt><dd>${esc(workTitle)}</dd></div>`:''}</dl>${basicWork?`<section class="report-basic-work"><h2>基本作業</h2><p>${esc(basicWork)}</p></section>`:''}<footer>株式会社ガヤ・コーポレーション</footer></section>`;
  const notes=`<section class="report-special"><h2>特別報告事項</h2><h3>【所見・備考】</h3><p>${esc(specialNotes||'特記事項なし')}</p></section>`;
@@ -312,7 +360,7 @@ async function openReportPreview(){
  setStatus('報告をまとめています…');
  try{
   const report=await buildReportHTML();
-  $('#reportPreview').innerHTML=report.body;
+  $('#reportPreview').innerHTML=report.body;const quickCover=$('#reportPreview #quickCoverButton');if(quickCover)quickCover.onclick=()=>$('#quickCoverPhoto').click();
   if(!$('#reportDialog').open)$('#reportDialog').showModal();
   const missingImages=$('#reportPreview').querySelectorAll('.report-image-missing').length;
   recordEvent('report_previewed',{photoCount:state.photos.length,unresolvedCount:report.unresolved,missingImageCount:missingImages});
@@ -320,24 +368,48 @@ async function openReportPreview(){
  }catch(e){console.error(e);setStatus('報告を開けませんでした。写真はそのまま残っています')}
 }
 
-async function shareReport(){
- if(!state.reportHTML)await buildReportHTML();
- const file=new File([state.reportHTML],state.reportFilename,{type:'text/html'});
- try{
-  if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
-   await navigator.share({title:'Field REPORT',files:[file]});
-   await recordEvent('report_shared',{method:'web-share-file'});
-   setStatus('共有メニューを開きました');
-   return;
-  }
- }catch(e){
-  if(e?.name==='AbortError')return;
-  console.warn('web share failed',e);
- }
- const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=state.reportFilename;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
- await recordEvent('report_shared',{method:'download-fallback'});
- setStatus('この端末では直接共有できないため、報告ファイルとして保存しました');
+async function drawableFromRecord(record){
+ const blob=imageBlobFromRecord(record);if(!blob)return null;
+ if('createImageBitmap'in window){try{return await createImageBitmap(blob)}catch{}}
+ return await new Promise(resolve=>{const img=new Image();const url=URL.createObjectURL(blob);img.onload=()=>{URL.revokeObjectURL(url);resolve(img)};img.onerror=()=>{URL.revokeObjectURL(url);resolve(null)};img.src=url})
 }
+function newPDFCanvas(){const c=document.createElement('canvas');c.width=1240;c.height=1754;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);return c}
+function wrapCanvasLines(ctx,text,maxWidth,maxLines=999){const out=[];for(const para of String(text||'').split(/\n/)){if(!para){out.push('');continue}let line='';for(const ch of para){const next=line+ch;if(line&&ctx.measureText(next).width>maxWidth){out.push(line);line=ch;if(out.length>=maxLines)return out}else line=next}if(line)out.push(line);if(out.length>=maxLines)return out}return out}
+function drawCanvasText(ctx,text,x,y,maxWidth,lineHeight,maxLines=999){const lines=wrapCanvasLines(ctx,text,maxWidth,maxLines);for(const line of lines){ctx.fillText(line,x,y);y+=lineHeight}return y}
+function imageSize(img){return {w:img?.width||img?.naturalWidth||0,h:img?.height||img?.naturalHeight||0}}
+function drawCanvasImage(ctx,img,x,y,w,h,mode='cover'){if(!img){ctx.fillStyle='#ecece6';ctx.fillRect(x,y,w,h);ctx.fillStyle='#777';ctx.font='500 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.textAlign='center';ctx.fillText('画像を読み込めません',x+w/2,y+h/2);ctx.textAlign='left';return}const s=imageSize(img);if(!s.w||!s.h)return;const scale=mode==='contain'?Math.min(w/s.w,h/s.h):Math.max(w/s.w,h/s.h);const dw=s.w*scale,dh=s.h*scale,dx=x+(w-dw)/2,dy=y+(h-dh)/2;ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();ctx.drawImage(img,dx,dy,dw,dh);ctx.restore()}
+function drawPageFooter(ctx,pageNo,total){ctx.fillStyle='#777';ctx.font='500 22px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.textAlign='center';ctx.fillText(`${pageNo} / ${total}`,620,1710);ctx.textAlign='left'}
+async function renderCoverPDFPage(){
+ const c=newPDFCanvas(),ctx=c.getContext('2d');const name=state.site?.placeholder?'現場未設定':state.site?.name||'現場未設定';
+ ctx.fillStyle='#111';ctx.textAlign='center';ctx.font='800 44px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(state.site?.reportTitle||'作業報告書',620,105);ctx.font='800 62px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(name,620,195);
+ ctx.font='500 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#555';if(state.site?.address)ctx.fillText(state.site.address,620,245);ctx.textAlign='left';
+ const cover=await drawableFromRecord(state.site);if(cover)drawCanvasImage(ctx,cover,110,300,1020,670,'cover');else{ctx.fillStyle='#ecece6';ctx.fillRect(110,300,1020,670);ctx.fillStyle='#777';ctx.textAlign='center';ctx.font='500 34px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('店舗外観写真 未設定',620,650);ctx.textAlign='left'}if(cover?.close)cover.close();
+ const meta=[['施工日時',state.visit?.workDate||'未入力'],['作業責任者',state.visit?.workerName||'未入力'],['顧客・会社名',state.site?.customerCompany||''],['今回の作業',state.visit?.workTitle||'']].filter(x=>x[1]);let y=1035;for(const [k,v] of meta){ctx.fillStyle='#111';ctx.font='700 30px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(k,130,y);ctx.font='500 30px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(v,360,y);y+=54}
+ if(state.site?.basicWork){ctx.fillStyle='#111';ctx.font='700 27px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('基本作業',130,y+15);ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#333';drawCanvasText(ctx,state.site.basicWork,130,y+55,980,34,6)}
+ ctx.textAlign='center';ctx.fillStyle='#111';ctx.font='800 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('株式会社ガヤ・コーポレーション',620,1660);ctx.textAlign='left';return c
+}
+async function drawPDFPhotoCard(ctx,photo,x,y,w,h){
+ ctx.strokeStyle='#d8d8d2';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);const imageH=360;const img=await drawableFromRecord(photo);if(img)drawCanvasImage(ctx,img,x,y,w,imageH,'cover');else drawCanvasImage(ctx,null,x,y,w,imageH);if(img?.close)img.close();
+ const place=pathLabel(effectivePlace(photo)),stage=photoStage(photo)||'区分未設定',comment=photoComment(photo)||'報告文未入力';let ty=y+imageH+42;ctx.fillStyle='#111';ctx.font='800 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(stage,x+22,ty);ty+=42;ctx.font='700 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(place,x+22,ty);ty+=40;ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#333';drawCanvasText(ctx,comment,x+22,ty,w-44,31,4)
+}
+async function renderBodyPDFPages(){
+ const photos=placedPhotosForReport(state.photos),pages=[],perPage=4;for(let offset=0;offset<photos.length;offset+=perPage){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#111';ctx.font='800 42px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(state.visit?.workTitle||'作業報告',70,85);ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#666';ctx.fillText(`${state.site?.name||'現場'} ・ ${state.visit?.workDate||''}`,70,125);const subset=photos.slice(offset,offset+perPage);for(let i=0;i<subset.length;i++){const col=i%2,row=Math.floor(i/2);await drawPDFPhotoCard(ctx,subset[i],70+col*570,170+row*730,530,680)}pages.push(c)}
+ if(state.visit?.specialNotes){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#b33';ctx.font='800 44px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('特別報告事項',80,120);ctx.fillStyle='#111';ctx.font='700 34px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('【所見・備考】',80,190);ctx.fillStyle='#fff4cf';ctx.fillRect(80,240,1080,1180);ctx.fillStyle='#222';ctx.font='500 30px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';drawCanvasText(ctx,state.visit.specialNotes,120,300,1000,44,24);pages.push(c)}return pages
+}
+async function canvasJpegBytes(canvas){const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('JPEG conversion failed')),'image/jpeg',0.9));return {bytes:new Uint8Array(await blob.arrayBuffer()),width:canvas.width,height:canvas.height}}
+function buildRasterPDF(images){
+ const enc=new TextEncoder(),chunks=[],offsets=[0];let offset=0;const push=x=>{const b=typeof x==='string'?enc.encode(x):x;chunks.push(b);offset+=b.length};const obj=(n,body)=>{offsets[n]=offset;push(`${n} 0 obj\n`);push(body);push(`\nendobj\n`)};push('%PDF-1.4\n%FIELDREPORT\n');const count=images.length,objCount=2+count*3;obj(1,'<< /Type /Catalog /Pages 2 0 R >>');const kids=images.map((_,i)=>`${3+i*3} 0 R`).join(' ');obj(2,`<< /Type /Pages /Kids [${kids}] /Count ${count} >>`);
+ for(let i=0;i<count;i++){const page=3+i*3,imgObj=page+1,contentObj=page+2,image=images[i];obj(page,`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im1 ${imgObj} 0 R >> >> /Contents ${contentObj} 0 R >>`);offsets[imgObj]=offset;push(`${imgObj} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`);push(image.bytes);push(`\nendstream\nendobj\n`);const stream='q 595.28 0 0 841.89 0 0 cm /Im1 Do Q';obj(contentObj,`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)}
+ const xref=offset;push(`xref\n0 ${objCount+1}\n0000000000 65535 f \n`);for(let i=1;i<=objCount;i++)push(`${String(offsets[i]).padStart(10,'0')} 00000 n \n`);push(`trailer\n<< /Size ${objCount+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);return new Blob(chunks,{type:'application/pdf'})
+}
+async function generatePDFFile(){
+ if(!state.site||!state.visit||!state.photos.length)throw new Error('report context missing');setStatus('PDFを作っています…');await applySafeKVCoverage();const canvases=[await renderCoverPDFPage(),...await renderBodyPDFPages()];const images=[];for(const c of canvases)images.push(await canvasJpegBytes(c));canvases.forEach(c=>{c.width=1;c.height=1});const blob=buildRasterPDF(images);const filename=`Field-REPORT-${state.visit.workDate}-${safeFilename(state.site.placeholder?'現場未設定':state.site.name)}.pdf`;const file=new File([blob],filename,{type:'application/pdf'});await recordEvent('pdf_generated',{pageCount:images.length,bytes:file.size});return file
+}
+async function shareReport(){
+ try{const file=await generatePDFFile();if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){await navigator.share({title:'Field REPORT',files:[file]});await recordEvent('report_shared',{method:'pdf-web-share',bytes:file.size});setStatus('PDFの共有メニューを開きました');return}downloadFile(file);await recordEvent('report_shared',{method:'pdf-download-fallback',bytes:file.size});setStatus('PDFを保存しました')}catch(e){if(e?.name==='AbortError')return;console.error(e);setStatus('PDFを作れませんでした。写真と報告内容は保持されています')}
+}
+function downloadFile(file){const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;a.target='_blank';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000)}
+async function savePDFReport(){try{const file=await generatePDFFile();downloadFile(file);setStatus(`PDFを作成しました（${Math.max(1,Math.round(file.size/1024))}KB）`)}catch(e){console.error(e);setStatus('PDFを作れませんでした。写真と報告内容は保持されています')}}
 
 async function semanticStagnationSummary(){
  const now=Date.now();const unresolved=state.photos.filter(isUnresolved);const events=await getAll('events');return {unresolvedCount:unresolved.length,unresolvedAgeMs:unresolved.reduce((n,p)=>n+Math.max(0,now-new Date(p.capturedAt).getTime()),0),lateResolutionCount:events.filter(e=>e.type==='photo_late_resolved').length,eventCount:events.length,blockedCaptureCount:0};
@@ -386,7 +458,7 @@ function render(){
  $('#unresolvedButton').textContent=state.showUnresolvedOnly?'すべて見る':`未確認 ${unresolved}`;
  $('#unresolvedButton').disabled=!unresolved && !state.showUnresolvedOnly;
  $('#unresolvedButton').classList.toggle('active',state.showUnresolvedOnly);
- const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.slice().reverse().forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
+ const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.slice().reverse().forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const coverAction=node.querySelector('.photo-cover-action');coverAction.textContent=state.site?.coverPhotoSource?.photoId===p.id?'表紙 ✓':'表紙';coverAction.onclick=()=>confirmCoverPhoto(p.id,false);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
  const completed=!!state.visit?.completedAt;
  $('#finishButton').hidden=completed;
  $('#finishButton').disabled=!state.visit||completed;
@@ -402,6 +474,7 @@ function setStatus(s){$('#status').textContent=s}
 
 async function runSelfTest(){
  // Shutter first: no site setup is allowed to block evidence capture.
+ if(withSiteSeed({name:'ハイム大川',address:''}).address!=='東京都渋谷区本町6-1-22 ハイム大川103')throw new Error('site KV seed failed');
  const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first]);
  if(!state.site?.placeholder||state.photos.length!==1||!isUnresolved(state.photos[0]))throw new Error('shutter-first failed');
  const originalSiteId=state.site.id;state.site={...state.site,name:'SELFTEST現場',placeholder:false,updatedAt:isoNow()};await put('sites',state.site);if(state.site.id!==originalSiteId)throw new Error('site identity changed while naming');
@@ -414,7 +487,7 @@ async function runSelfTest(){
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
  const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
- await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
+ await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
  document.body.dataset.selftest='pass';document.body.dataset.unresolved='1';setStatus('SELFTEST PASS');
 }
 

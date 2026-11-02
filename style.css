@@ -31,7 +31,7 @@ body[data-stage="place"] .capture-zone{grid-template-columns:1fr 1fr}
 
 
 /* Capture semantics: select once, inherit until the work phase changes. */
-.stage-card{display:grid;gap:14px}.stage-card h2{margin:.1em 0}.stage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stage-choice,.preset-choice{appearance:none;border:1px solid #d4d5cd;border-radius:12px;background:#fafaf7;color:#191a17;padding:12px;font:inherit;font-weight:750;cursor:pointer}.stage-choice.active{background:#191a17;color:#fff;border-color:#191a17}.preset-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}select,textarea{font:inherit;font-size:16px;padding:13px;border:1px solid #cfd0c9;border-radius:12px;background:#fff;width:100%}textarea{resize:vertical}.photo-stage{font-size:13px}.photo-comment{font-size:13px;font-weight:650;line-height:1.35}.photo-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.photo-actions button{width:100%;padding:9px 8px;font-size:12px}.report-stage{display:inline-block!important;background:#e9eadf;border-radius:999px;padding:4px 8px;color:#191a17!important;font-weight:750}.report-comment{font-size:16px!important;color:#191a17!important;margin:8px 0!important;white-space:pre-wrap}body[data-stage="place"] #stageCard{opacity:.92}
+.stage-card{display:grid;gap:14px}.stage-card h2{margin:.1em 0}.stage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stage-choice,.preset-choice{appearance:none;border:1px solid #d4d5cd;border-radius:12px;background:#fafaf7;color:#191a17;padding:12px;font:inherit;font-weight:750;cursor:pointer}.stage-choice.active{background:#191a17;color:#fff;border-color:#191a17}.preset-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}select,textarea{font:inherit;font-size:16px;padding:13px;border:1px solid #cfd0c9;border-radius:12px;background:#fff;width:100%}textarea{resize:vertical}.photo-stage{font-size:13px}.photo-comment{font-size:13px;font-weight:650;line-height:1.35}.photo-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:7px}.photo-actions button{width:100%;padding:9px 8px;font-size:12px}.report-stage{display:inline-block!important;background:#e9eadf;border-radius:999px;padding:4px 8px;color:#191a17!important;font-weight:750}.report-comment{font-size:16px!important;color:#191a17!important;margin:8px 0!important;white-space:pre-wrap}body[data-stage="place"] #stageCard{opacity:.92}
 
 
 /* GAYA report contract: visible capability stays; repeated office work moves inside. */
@@ -43,3 +43,7 @@ body[data-stage="place"] .capture-zone{grid-template-columns:1fr 1fr}
 
 /* Shinkenzemi KV cache: cached facts are reused; contextual authority stays explicit. */
 .kv-hints{display:grid;gap:8px}.kv-suggestion{appearance:none;border:1px dashed #9b9d92;border-radius:12px;background:#f5f5ef;padding:11px 12px;text-align:left;font:inherit;font-weight:700;color:#3f413b}.preset-choice[data-kind="cached"]{grid-column:1/-1;text-align:left;background:#f4efe3}
+
+.report-actions{grid-template-columns:1fr 1fr}.report-actions #printOnlyButton{grid-column:1/-1}.photo-item[data-placement*='外観']{outline:2px solid #9b7d45;outline-offset:-2px}
+
+button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-missing small{display:block;margin-top:8px;font-size:12px}
