@@ -152,7 +152,7 @@ function bind(){
  $('#quickCoverPhoto').onchange=e=>saveQuickCover(e.target.files?.[0]||null);
  document.querySelectorAll('.stage-choice').forEach(button=>{button.onclick=()=>{state.activeStage=button.dataset.stage||'';recordEvent('capture_stage_selected',{stage:state.activeStage});setStatus(`${state.activeStage} として次の写真を記録します`);render()}});
  $('#placeButton').onclick=()=>openPlaceDialog(null);
- $('#moveButton').onclick=()=>{state.activePlace=null;recordEvent('place_boundary',{reason:'explicit_move'});setStatus('場所を解除しました。次の場所を選ぶまで写真は「場所未設定」で残ります');render()};
+ $('#moveButton').onclick=()=>clearActivePlace();
  $('#createSiteButton').onclick=createOrNameSite;
  $('#createPlaceButton').onclick=createPlace;
  $('#photoCapture').onchange=e=>captureFiles(e.target.files);
@@ -228,6 +228,20 @@ async function saveReportMeta(){
  await recordEvent('report_metadata_saved',{hasCover:!!imageBlobFromRecord(state.site),hasAddress:!!address,hasWorker:!!state.visit?.workerName,kvLastWorkTitle:siteKV().lastWorkTitle||null});closeReportMeta();setStatus('報告書情報を保存しました。表紙・住所・基本作業は次回も使います');render();
 }
 
+async function clearActivePlace(){
+ const from=state.activePlace;state.activePlace=null;await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:null,fromPath:from?.path||null,toPath:null,reason:'explicit-unresolved'});setStatus('場所未設定で撮影できます');render()
+}
+function quickPlaceScore(place){const used=Date.parse(place.lastUsedAt||'')||0;let count=0;for(const [key,n] of Object.entries(siteKV().placementCounts)){if(key.startsWith(pathLabel(place.path)+'|'))count+=Number(n)||0}return used+count*1000}
+function renderQuickPlaces(){
+ const root=$('#quickPlaces');if(!root)return;root.innerHTML='';if(!state.site)return;
+ const places=[...(state.site.places||[])].sort((a,b)=>{
+  if(a.id===state.activePlace?.id)return -1;if(b.id===state.activePlace?.id)return 1;return quickPlaceScore(b)-quickPlaceScore(a)
+ });
+ for(const place of places){const b=document.createElement('button');b.type='button';b.className='quick-place';b.classList.toggle('active',place.id===state.activePlace?.id);b.textContent=pathLabel(place.path);b.onclick=()=>selectQuickPlace(place.id);root.append(b)}
+ if(state.activePlace){const u=document.createElement('button');u.type='button';u.className='quick-place unresolved';u.textContent='場所未設定';u.onclick=clearActivePlace;root.append(u)}
+}
+async function selectQuickPlace(id){const p=state.site?.places.find(x=>x.id===id);if(!p||p.id===state.activePlace?.id)return;await applyPlace(p);render()}
+
 function openPlaceDialog(photoId){
  if(!state.site){setStatus('場所はあとでも決められます。まず撮影できます');return}
  state.resolvingPhotoId=photoId;
@@ -269,7 +283,7 @@ async function selectSite(id){
 async function selectPlace(id){const p=state.site?.places.find(x=>x.id===id);if(p){await applyPlace(p);$('#placeDialog').close();render()}}
 async function applyPlace(place){
  if(state.resolvingPhotoId){await resolvePhotoPlace(state.resolvingPhotoId,place);state.resolvingPhotoId=null;return}
- state.activePlace=place;await recordEvent('place_selected',{placeId:place.id,path:place.path});setStatus(`${pathLabel(place.path)} で撮影できます`);
+ const from=state.activePlace;const now=isoNow();const idx=state.site?.places.findIndex(p=>p.id===place.id)??-1;const next={...place,lastUsedAt:now};if(idx>=0){state.site.places[idx]=next;state.site.updatedAt=now;await put('sites',state.site)}state.activePlace=next;await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:next.id,fromPath:from?.path||null,toPath:next.path});setStatus(`${pathLabel(next.path)} で撮影できます`);
 }
 
 function openPhotoDetail(photoId){
@@ -423,7 +437,7 @@ function nextStepText(){
  if(state.visit?.completedAt)return '今日の現場は完了です。必要なら報告を作って共有できます。';
  const unresolved=state.photos.filter(isUnresolved).length;
  if(unresolved)return `撮影を続けられます。場所未確認 ${unresolved}枚は最後にその枚数だけ確認できます。`;
- if(!state.photos.length)return '場所を選んで撮影。場所が分からなければ、そのまま撮って大丈夫です。';
+ if(!state.photos.length)return '場所を1回選んで撮影。移動したら次の場所を1タップするだけです。';
  return '撮影を続ける。終わったら「今日の現場を完了する」で今日を閉じます。';
 }
 function render(){
@@ -443,13 +457,13 @@ function render(){
  $('#siteSubtitle').textContent=stage==='site'?'最初に、今日どこで仕事するかだけ決めます。':state.visit?`${state.visit.workDate} / ${state.visit.completedAt?'完了':'作業中'}`:'撮った時に分かっていた意味を、そのまま残す。';
  $('#currentPlace').textContent=state.activePlace?pathLabel(state.activePlace.path):'どこで撮る？';
  $('#placeHint').textContent=state.activePlace?'この場所を写真へ記録します。':'分かる範囲だけで大丈夫。分からなくても撮影できます。';
- $('#placeButton').hidden=!!state.activePlace;
- $('#placeButton').textContent=state.site?.places?.length?'場所を選ぶ':'場所を決める';
+ renderQuickPlaces();
+ $('#placeButton').hidden=false;
+ $('#placeButton').textContent=state.site?.places?.length?'＋ 場所':'場所を決める';
  $('#currentStage').textContent=state.activeStage||'区分未設定';
  document.querySelectorAll('.stage-choice').forEach(button=>button.classList.toggle('active',button.dataset.stage===state.activeStage));
  $('#stageHint').textContent=state.activeStage?`${state.activeStage} を次の写真へ引き継ぎます。変わった時だけ押し直します。`:'区分は後からでも付けられます。今分かるなら一度だけ選んでください。';
- $('#moveButton').hidden=!state.activePlace;
- $('#moveButton').textContent='場所を変える';
+ $('#moveButton').hidden=true;
  const captureLabel=$('#captureLabel');
  captureLabel.textContent=stage==='place'?'場所未設定で撮影':'📷 撮影';
  captureLabel.classList.toggle('capture-secondary',stage==='place');
@@ -483,7 +497,7 @@ async function runSelfTest(){
  openPhotoDetail(state.photos[1].id);$('#photoCommentInput').value='異常は確認されませんでした';await savePhotoDetail();if(photoComment(state.photos[1])!=='異常は確認されませんでした')throw new Error('photo report text save failed');if(!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV comment cache failed');if(photoCapability(state.photos[1]).hash!==photoCapability(state.photos[1]).hash)throw new Error('cHash unstable');
  // Resolve the first photo later without rewriting capture-time truth.
  await resolvePhotoPlace(state.photos[0].id,place);if(state.photos[0].placeSnapshot!==null||pathLabel(state.photos[0].placeResolution?.path)!=='1F・厨房')throw new Error('late resolution rewrote capture truth');
- state.activePlace=null;const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third]);if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');
+ const place2={id:uuid(),path:['1F','シンク'],createdAt:isoNow()};state.site.places.push(place2);await put('sites',state.site);await selectQuickPlace(place2.id);if(pathLabel(state.activePlace?.path)!=='1F・シンク')throw new Error('one-tap place transition failed');await selectQuickPlace(place.id);if(pathLabel(state.activePlace?.path)!=='1F・厨房')throw new Error('one-tap place return failed');await clearActivePlace();const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third]);if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
  const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');

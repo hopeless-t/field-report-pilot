@@ -40,9 +40,10 @@
         <h2 id="currentPlace">場所未設定</h2>
         <p id="placeHint">分からなくても撮影は止まりません。</p>
       </div>
-      <div class="row">
-        <button id="placeButton" class="secondary">場所を選ぶ</button>
-        <button id="moveButton" class="ghost">場所を変える</button>
+      <div id="quickPlaces" class="quick-places" aria-label="場所を直接切り替える"></div>
+      <div class="row place-create-row">
+        <button id="placeButton" class="secondary">＋ 場所</button>
+        <button id="moveButton" class="ghost" hidden>場所未設定にする</button>
       </div>
     </section>
 

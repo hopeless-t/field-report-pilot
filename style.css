@@ -47,3 +47,7 @@ body[data-stage="place"] .capture-zone{grid-template-columns:1fr 1fr}
 .report-actions{grid-template-columns:1fr 1fr}.report-actions #printOnlyButton{grid-column:1/-1}.photo-item[data-placement*='外観']{outline:2px solid #9b7d45;outline-offset:-2px}
 
 button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-missing small{display:block;margin-top:8px;font-size:12px}
+
+
+/* One-stroke place transitions: direct from old place to new place, no clearing step. */
+.quick-places{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}.quick-places::-webkit-scrollbar{display:none}.quick-place{flex:0 0 auto;appearance:none;border:1px solid #d4d5cd;background:#fafaf7;color:#191a17;border-radius:999px;padding:10px 14px;font:inherit;font-weight:750;white-space:nowrap}.quick-place.active{background:#191a17;color:#fff;border-color:#191a17}.quick-place.unresolved{border-style:dashed;color:#686a63}.place-create-row{justify-content:flex-end}.place-create-row #placeButton{padding:10px 14px}
