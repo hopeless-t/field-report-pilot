@@ -187,6 +187,7 @@ function bind(){
  $('#reportButton').onclick=openReportPreview;
  $('#closeReportButton').onclick=()=>$('#reportDialog').close();
  $('#editReportMetaButton').onclick=()=>editReportMetaFromPreview();
+ $('#shareEditableHTMLButton').onclick=shareEditableHTML;
  $('#shareReportButton').onclick=shareReport;
  $('#printReportButton').onclick=savePDFReport;
  $('#printOnlyButton').onclick=()=>window.print();
@@ -424,6 +425,65 @@ async function openReportPreview(){
  }catch(e){console.error(e);setStatus('報告を開けませんでした。写真はそのまま残っています')}
 }
 
+function buildEditableStandaloneHTML(report){
+ const editableSelectors=[
+  '.report-cover-kicker','.report-cover h1','.report-cover-address','.report-cover-meta dd','.report-basic-work p',
+  '.report-body>header h1','.report-body>header p:last-child','.report-group h3','.report-stage','.report-comment',
+  '.report-special h3','.report-special p'
+ ];
+ const css=`<style id="pc-edit-css">
+  body{padding-top:92px!important}.pc-edit-toolbar{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:#181a17;color:#fff;box-shadow:0 2px 8px #0003}.pc-edit-toolbar strong{font-size:16px}.pc-edit-toolbar span{opacity:.75;font-size:12px;margin-right:auto}.pc-edit-toolbar button{border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:750;cursor:pointer}.pc-edit-toolbar .save{background:#fff;color:#111}.pc-edit-toolbar .print{background:#e9eadf;color:#111}[contenteditable="true"]{outline:1px dashed transparent;transition:.15s;cursor:text}[contenteditable="true"]:hover,[contenteditable="true"]:focus{outline-color:#6a8cff;background:#eef3ff!important}.report-edit-control{display:none!important}@media print{body{padding-top:0!important}.pc-edit-toolbar{display:none!important}[contenteditable="true"]{outline:0!important}}
+ </style>`;
+ const toolbar=`<div class="pc-edit-toolbar"><strong>Field REPORT｜PC編集</strong><span>文字をクリックして編集できます</span><button class="save" type="button" onclick="saveEditedHTML()">編集済みHTMLを保存</button><button class="print" type="button" onclick="window.print()">PDF / 印刷</button></div>`;
+ const js=`<script>(function(){
+ const selectors=${JSON.stringify(editableSelectors)};
+ function enable(){for(const s of selectors){document.querySelectorAll(s).forEach(el=>{el.contentEditable='true';el.spellcheck=true;el.title='クリックして編集';});}}
+ window.saveEditedHTML=function(){
+  const clone=document.documentElement.cloneNode(true);
+  clone.querySelectorAll('[contenteditable]').forEach(el=>{el.removeAttribute('contenteditable');el.removeAttribute('spellcheck');el.removeAttribute('title')});
+  clone.querySelectorAll('.pc-edit-toolbar').forEach(el=>el.remove());
+  const body=clone.querySelector('body');if(body)body.insertAdjacentHTML('afterbegin',${JSON.stringify(toolbar)});
+  const html='<!doctype html>\\n'+clone.outerHTML;const blob=new Blob([html],{type:'text/html;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=document.title.replace(/[\\/:*?"<>|]/g,'_')+'-edited.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+ };
+ enable();
+ })();<\/script>`;
+ let html=report.html;
+ html=html.replace('</head>',css+'</head>');
+ html=html.replace('<body>','<body>'+toolbar);
+ html=html.replace('</body>',js+'</body>');
+ return html;
+}
+async function generateEditableHTMLFile(){
+ const report=await buildReportHTML();const html=buildEditableStandaloneHTML(report);const filename=`Field-REPORT-${state.visit.workDate}-${safeFilename(report.displayName)}-PC-edit.html`;return new File([html],filename,{type:'text/html;charset=utf-8'})
+}
+async function shareEditableHTML(){
+ try{const file=await generateEditableHTMLFile();if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){await navigator.share({title:'Field REPORT PC編集用',files:[file]});await recordEvent('report_shared',{method:'editable-html-web-share',bytes:file.size});setStatus('PC編集用HTMLの共有メニューを開きました');return}downloadFile(file);await recordEvent('report_shared',{method:'editable-html-download',bytes:file.size});setStatus('PC編集用HTMLを保存しました')}
+ catch(e){if(e?.name==='AbortError')return;console.error(e);setStatus('PC編集用HTMLを作れませんでした。元の報告データは保持されています')}
+}
+
+function editableReportHTML(report){
+ const base=String(report.html||'');
+ const toolbar=`<div id="pcEditToolbar"><strong>Field REPORT｜PC編集モード</strong><span>文字はクリックして直接編集。写真はクリックして差し替え。</span><div class="pc-edit-actions"><button type="button" id="saveEditedHTMLButton">編集済みHTMLを保存</button><button type="button" id="pcPrintButton">PDF / 印刷</button></div></div>`;
+ const style=`<style id="pcEditStyle">
+ #pcEditToolbar{position:sticky;top:0;z-index:9999;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;background:#171815;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;box-shadow:0 2px 12px #0003}#pcEditToolbar strong{font-size:16px}#pcEditToolbar span{font-size:13px;opacity:.8;flex:1}.pc-edit-actions{display:flex;gap:8px}.pc-edit-actions button{border:0;border-radius:9px;padding:9px 13px;font:inherit;font-weight:750;cursor:pointer}.pc-editable{outline:1px dashed transparent;transition:.15s}.pc-editable:hover,.pc-editable:focus{outline:2px solid #76a8ff;outline-offset:3px;background:#eef5ff}.pc-image-editable{cursor:pointer;outline:2px dashed transparent;outline-offset:2px}.pc-image-editable:hover{outline-color:#76a8ff}.pc-image-editable::after{content:""}@media print{#pcEditToolbar{display:none!important}.pc-editable{outline:none!important;background:transparent!important}.pc-image-editable{outline:none!important}}
+ </style>`;
+ const script=`<script id="pcEditScript">(function(){
+ const EDITABLE=['.report-cover-kicker','.report-cover h1','.report-cover-address','.report-cover-meta dd','.report-basic-work p','.report-body>header h1','.report-body>header p:last-child','.report-work-section>h2','.report-group h3','.report-stage','.report-comment','.report-special h3','.report-special p'];
+ function enable(){for(const sel of EDITABLE)document.querySelectorAll(sel).forEach(el=>{el.contentEditable='true';el.spellcheck=true;el.classList.add('pc-editable');el.title='クリックして編集'});document.querySelectorAll('.report-cover-image,.report-photo img').forEach(img=>{img.classList.add('pc-image-editable');img.title='クリックして写真を差し替え';img.onclick=()=>replaceImage(img)});document.querySelectorAll('.report-edit-control').forEach(el=>el.remove())}
+ function replaceImage(img){const input=document.createElement('input');input.type='file';input.accept='image/*';input.onchange=()=>{const f=input.files&&input.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{img.src=r.result};r.readAsDataURL(f)};input.click()}
+ function serializableHTML(){const clone=document.documentElement.cloneNode(true);clone.querySelectorAll('[contenteditable]').forEach(el=>{el.removeAttribute('contenteditable');el.classList.remove('pc-editable');el.removeAttribute('title')});clone.querySelectorAll('.pc-image-editable').forEach(el=>{el.classList.remove('pc-image-editable');el.removeAttribute('title');el.removeAttribute('onclick')});return '<!doctype html>\\n'+clone.outerHTML}
+ function downloadHTML(){const blob=new Blob([serializableHTML()],{type:'text/html;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=document.title.replace(/[\\\\/:*?\"<>|]/g,'_')+'.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),60000)}
+ document.getElementById('saveEditedHTMLButton').onclick=downloadHTML;document.getElementById('pcPrintButton').onclick=()=>window.print();enable();
+ })();<\/script>`;
+ let html=base.replace('</head>',`${style}</head>`).replace('<body>',`<body>${toolbar}`).replace('</body>',`${script}</body>`);
+ return html
+}
+async function generateEditableHTMLFile(){
+ if(!state.site||!state.visit||!state.photos.length)throw new Error('report context missing');const report=await buildReportHTML();const html=editableReportHTML(report);const display=state.site.placeholder?'現場未設定':state.site.name;const filename=`Field-REPORT-${state.visit.workDate}-${safeFilename(display)}-PC編集.html`;const file=new File([html],filename,{type:'text/html'});await recordEvent('editable_html_generated',{bytes:file.size,photoCount:state.photos.length});return file
+}
+async function shareEditableHTML(){
+ try{const file=await generateEditableHTMLFile();if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){await navigator.share({title:'Field REPORT PC編集用',text:'PCでブラウザを使って編集できます',files:[file]});await recordEvent('editable_html_shared',{method:'web-share',bytes:file.size});setStatus('PC編集用HTMLの共有メニューを開きました');return}downloadFile(file);await recordEvent('editable_html_shared',{method:'download-fallback',bytes:file.size});setStatus('PC編集用HTMLを保存しました')}catch(e){if(e?.name==='AbortError')return;console.error(e);setStatus('PC編集用HTMLを作れませんでした。写真と報告内容は保持されています')}
+}
 async function drawableFromRecord(record){
  const blob=imageBlobFromRecord(record);if(!blob)return null;
  if('createImageBitmap'in window){try{return await createImageBitmap(blob)}catch{}}
@@ -547,7 +607,7 @@ async function runSelfTest(){
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
  const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
- await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');if($('#reportPreview').querySelectorAll('.report-photo-edit').length!==3||!$('#reportPreview').querySelector('.report-meta-edit-inline'))throw new Error('report in-app edit controls missing');const sectionLabels=[...$('#reportPreview').querySelectorAll('.report-work-section>h2')].map(x=>x.textContent);if(sectionLabels[0]!=='1. ゴキブリトラップ')throw new Error('report work order failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['ゴキブリトラップ|1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
+ await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');if($('#reportPreview').querySelectorAll('.report-photo-edit').length!==3||!$('#reportPreview').querySelector('.report-meta-edit-inline'))throw new Error('report in-app edit controls missing');const sectionLabels=[...$('#reportPreview').querySelectorAll('.report-work-section>h2')].map(x=>x.textContent);if(sectionLabels[0]!=='1. ゴキブリトラップ')throw new Error('report work order failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');const editable=await generateEditableHTMLFile();const editableText=await editable.text();if(editable.type!=='text/html'||editable.size<1000||!editableText.includes('PC編集モード')||!editableText.includes('saveEditedHTMLButton')||!editableText.includes('data:image/'))throw new Error('editable HTML generation failed');const editable=await generateEditableHTMLFile();const editableText=await editable.text();if(editable.type!=='text/html;charset=utf-8'&&!editable.type.startsWith('text/html'))throw new Error('editable HTML type failed');if(!editableText.includes('Field REPORT｜PC編集')||!editableText.includes('saveEditedHTML')||!editableText.includes('data:image/'))throw new Error('editable HTML bundle failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['ゴキブリトラップ|1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
  document.body.dataset.selftest='pass';document.body.dataset.unresolved='1';setStatus('SELFTEST PASS');
 }
 
