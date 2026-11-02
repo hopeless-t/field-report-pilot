@@ -34,6 +34,19 @@
       <label class="text-escape" for="photoCapture">現場名はあとで、まず撮る</label>
     </section>
 
+    <section id="coverCaptureCard" class="card cover-capture-card" hidden>
+      <div class="cover-capture-copy">
+        <p class="eyebrow">報告書の表紙</p>
+        <h2 id="coverCaptureTitle">店舗外観</h2>
+        <p id="coverCaptureHint">これは作業写真ではありません。場所・区分・報告文は不要です。</p>
+      </div>
+      <div class="cover-capture-row">
+        <img id="coverCaptureThumb" class="cover-capture-thumb" alt="表紙の店舗外観" hidden>
+        <label id="coverCaptureButton" class="secondary cover-capture-button" for="coverCapture">🏠 外観を撮る</label>
+        <input id="coverCapture" type="file" accept="image/*" capture="environment" hidden>
+      </div>
+    </section>
+
     <section id="placeCard" class="card place-card">
       <div>
         <p class="eyebrow">いまどこ？</p>
@@ -211,7 +224,7 @@
     </article>
   </template>
 
-  <input id="quickCoverPhoto" type="file" accept="image/*" hidden>
+  <input id="quickCoverPhoto" type="file" accept="image/*" capture="environment" hidden>
   <script src="app.js" defer></script>
 </body>
 </html>
