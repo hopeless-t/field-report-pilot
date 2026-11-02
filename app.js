@@ -17,7 +17,7 @@ const SITE_SEEDS=[
 function seedForSiteName(name){return SITE_SEEDS.find(x=>x.match.test(String(name||'').trim()))||null}
 function withSiteSeed(site){const seed=seedForSiteName(site?.name);if(!seed)return site;return {...site,address:site.address||seed.address,seedSource:site.seedSource||'known-site-kv'}}
 function isCoverCandidate(photo){const place=pathLabel(effectivePlace(photo));return /(店舗?外観|建物外観|外観|正面|ファサード|エントランス外)/.test(place)}
-function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{},commentsByPlacement:kv.commentsByPlacement&&typeof kv.commentsByPlacement==='object'?kv.commentsByPlacement:{}}}
+function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{},commentsByPlacement:kv.commentsByPlacement&&typeof kv.commentsByPlacement==='object'?kv.commentsByPlacement:{},customPresets:Array.isArray(kv.customPresets)?kv.customPresets.filter(Boolean).slice(0,12):[]}}
 function fastHash(input){let h=2166136261;for(const ch of String(input)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(16).padStart(8,'0')}
 function photoCapability(photo){
  const place=pathLabel(effectivePlace(photo));const stage=photoStage(photo).trim();const comment=photoComment(photo).trim();const readable=!!imageBlobFromRecord(photo);
@@ -125,7 +125,7 @@ async function init(){
 async function ensureWorkingContext(){
  if(state.site && state.visit)return;
  if(!state.site){
-  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{}},createdAt:isoNow(),updatedAt:isoNow()};
+  const site={id:uuid(),name:'現場未設定',placeholder:true,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{},customPresets:[]},createdAt:isoNow(),updatedAt:isoNow()};
   await put('sites',site);state.site=site;localStorage.setItem('field-report-last-site',site.id);await recordEvent('site_auto_created');
  }
  await startOrResumeVisit(state.site);
@@ -146,6 +146,8 @@ function bind(){
  $('#siteButton').onclick=openSiteDialog;
  $('#startSiteButton').onclick=openSiteDialog;
  $('#reportMetaButton').onclick=openReportMeta;
+ $('#helpButton').onclick=()=>$('#helpDialog').showModal();
+ $('#closeHelpButton').onclick=()=>$('#helpDialog').close();
  $('#closeReportMetaButton').onclick=closeReportMeta;
  $('#saveReportMetaButton').onclick=saveReportMeta;
  $('#reportCoverPhoto').onchange=e=>previewCoverPhoto(e.target.files?.[0]||null);
@@ -171,6 +173,7 @@ function bind(){
  $('#closeInstallButton').onclick=()=>$('#installDialog').close();
  $('#closePhotoDetailButton').onclick=()=>$('#photoDetailDialog').close();
  $('#savePhotoDetailButton').onclick=savePhotoDetail;
+ $('#savePresetButton').onclick=saveCurrentCommentAsPreset;
  $('#makeCoverButton').onclick=setCoverFromPhoto;
  document.querySelectorAll('.preset-choice').forEach(button=>{button.onclick=()=>{$('#photoCommentInput').value=button.dataset.comment||''}});
 }
@@ -181,7 +184,7 @@ async function createOrNameSite(){
   state.site=withSiteSeed({...state.site,name,placeholder:false,updatedAt:isoNow()});await put('sites',state.site);await recordEvent('site_named_after_capture',{name});
   $('#newSiteName').value='';$('#siteDialog').close();setStatus(`${name} として現場を保存しました`);render();return;
  }
- const site=withSiteSeed({id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{}},createdAt:isoNow(),updatedAt:isoNow()});await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
+ const site=withSiteSeed({id:uuid(),name,placeholder:false,places:[],customerCompany:'',address:'',reportTitle:'作業報告書',basicWork:'',coverPhotoBlob:null,kvCache:{lastWorkTitle:'',recentComments:[],placementCounts:{},placementByPhoto:{},commentsByPlacement:{},customPresets:[]},createdAt:isoNow(),updatedAt:isoNow()});await put('sites',site);await recordEvent('site_created',{siteId:site.id});$('#newSiteName').value='';$('#siteDialog').close();await startOrResumeVisit(site);setStatus('新しい現場を開きました')
 }
 
 function releaseCoverPreview(){if(state.coverPreviewURL){URL.revokeObjectURL(state.coverPreviewURL);state.coverPreviewURL=null}}
@@ -193,10 +196,14 @@ function setCoverPreview(source){
 }
 function renderPresetChoices(){
  const root=$('#presetChoices');if(!root)return;root.innerHTML='';
- const cached=siteKV().recentComments;const items=[];const seen=new Set();
+ const kv=siteKV(),cached=kv.recentComments;const items=[];const seen=new Set();
+ for(const comment of kv.customPresets){if(seen.has(comment))continue;seen.add(comment);items.push(['定型',comment,'custom'])}
  for(const comment of cached){if(seen.has(comment))continue;seen.add(comment);items.push(['前回',comment,'cached'])}
  for(const [label,comment] of BUILTIN_PRESETS){if(seen.has(comment))continue;seen.add(comment);items.push([label,comment,'builtin'])}
- for(const [label,comment,kind] of items.slice(0,10)){const b=document.createElement('button');b.type='button';b.className='preset-choice';b.dataset.comment=comment;b.dataset.kind=kind;b.textContent=kind==='cached'?`↻ ${comment}`:label;b.onclick=()=>{$('#photoCommentInput').value=comment};root.append(b)}
+ for(const [label,comment,kind] of items.slice(0,12)){const b=document.createElement('button');b.type='button';b.className='preset-choice';b.dataset.comment=comment;b.dataset.kind=kind;b.textContent=kind==='cached'?`↻ ${comment}`:kind==='custom'?`★ ${comment}`:label;b.onclick=()=>{$('#photoCommentInput').value=comment};root.append(b)}
+}
+async function saveCurrentCommentAsPreset(){
+ const value=$('#photoCommentInput').value.trim();if(!value)return setStatus('先に報告文を入力してください');await updateSiteKV(kv=>({...kv,customPresets:[value,...kv.customPresets.filter(x=>x!==value)].slice(0,12)}));renderPresetChoices();setStatus('この文を定型文として保存しました。次回からワンタップで使えます')
 }
 function renderKVHints(){
  const root=$('#reportKVHints');if(!root)return;root.innerHTML='';const kv=siteKV();const current=$('#reportWorkTitle').value.trim();
@@ -310,7 +317,7 @@ async function captureFiles(files){
   const learned=bestPlacementComment(photo);if(learned)photo={...photo,comment:learned,commentSource:'kv-placement'};
   await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);await maybePromoteCover(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash,commentAutofilled:!!learned});
  }
- $('#photoCapture').value='';$('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render()
+ $('#photoCapture').value='';$('#photoImport').value='';const stageText=state.activeStage?` / ${state.activeStage}`:'';setStatus(state.activePlace?`写真を場所付きで保存しました${stageText}`:`写真を保存しました${stageText}。場所は未設定のまま保持しています`);render();requestAnimationFrame(()=>document.querySelector('#photoGrid .photo-item:last-child')?.scrollIntoView({behavior:'smooth',block:'nearest'}))
 }
 
 async function resolvePhotoPlace(photoId,place){
@@ -474,7 +481,7 @@ function render(){
  $('#unresolvedButton').textContent=state.showUnresolvedOnly?'すべて見る':`未確認 ${unresolved}`;
  $('#unresolvedButton').disabled=!unresolved && !state.showUnresolvedOnly;
  $('#unresolvedButton').classList.toggle('active',state.showUnresolvedOnly);
- const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.slice().reverse().forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const coverAction=node.querySelector('.photo-cover-action');const isCurrentCover=state.site?.coverPhotoSource?.photoId===p.id;coverAction.hidden=!isCurrentCover&&!isCoverCandidate(p);coverAction.textContent=isCurrentCover?'表紙 ✓':'表紙';coverAction.onclick=()=>confirmCoverPhoto(p.id,false);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
+ const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const coverAction=node.querySelector('.photo-cover-action');const isCurrentCover=state.site?.coverPhotoSource?.photoId===p.id;coverAction.hidden=!isCurrentCover&&!isCoverCandidate(p);coverAction.textContent=isCurrentCover?'表紙 ✓':'表紙';coverAction.onclick=()=>confirmCoverPhoto(p.id,false);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
  const completed=!!state.visit?.completedAt;
  $('#finishButton').hidden=completed;
  $('#finishButton').disabled=!state.visit||completed;
@@ -499,7 +506,7 @@ async function runSelfTest(){
  openPhotoDetail(state.photos[1].id);$('#photoCommentInput').value='異常は確認されませんでした';await savePhotoDetail();if(photoComment(state.photos[1])!=='異常は確認されませんでした')throw new Error('photo report text save failed');if(!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV comment cache failed');if(photoCapability(state.photos[1]).hash!==photoCapability(state.photos[1]).hash)throw new Error('cHash unstable');
  // Resolve the first photo later without rewriting capture-time truth.
  await resolvePhotoPlace(state.photos[0].id,place);if(state.photos[0].placeSnapshot!==null||pathLabel(state.photos[0].placeResolution?.path)!=='1F・厨房')throw new Error('late resolution rewrote capture truth');
- const place2={id:uuid(),path:['1F','シンク'],createdAt:isoNow()};state.site.places.push(place2);await put('sites',state.site);await selectQuickPlace(place2.id);if(pathLabel(state.activePlace?.path)!=='1F・シンク')throw new Error('one-tap place transition failed');await selectQuickPlace(place.id);if(pathLabel(state.activePlace?.path)!=='1F・厨房')throw new Error('one-tap place return failed');await clearActivePlace();await applyPlace(place);state.activeStage='施工前';state.visit={...state.visit,currentStage:'施工前'};await put('visits',state.visit);const sameVisitId=state.visit.id;await startOrResumeVisit(state.site);if(state.visit.id!==sameVisitId||pathLabel(state.activePlace?.path)!=='1F・厨房'||state.activeStage!=='施工前')throw new Error('same-visit context restore failed');await clearActivePlace();const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third]);if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');
+ const place2={id:uuid(),path:['1F','シンク'],createdAt:isoNow()};state.site.places.push(place2);await put('sites',state.site);await selectQuickPlace(place2.id);if(pathLabel(state.activePlace?.path)!=='1F・シンク')throw new Error('one-tap place transition failed');await selectQuickPlace(place.id);if(pathLabel(state.activePlace?.path)!=='1F・厨房')throw new Error('one-tap place return failed');await clearActivePlace();await applyPlace(place);state.activeStage='施工前';state.visit={...state.visit,currentStage:'施工前'};await put('visits',state.visit);const sameVisitId=state.visit.id;await startOrResumeVisit(state.site);if(state.visit.id!==sameVisitId||pathLabel(state.activePlace?.path)!=='1F・厨房'||state.activeStage!=='施工前')throw new Error('same-visit context restore failed');await clearActivePlace();const third=new File([pixel],'selftest-c.png',{type:'image/png'});await captureFiles([third]);if(!isUnresolved(state.photos[2]))throw new Error('unresolved capture failed');const renderedIds=[...document.querySelectorAll('#photoGrid .photo-item')].map(x=>x.dataset.chash);const expectedIds=state.photos.map(p=>photoCapability(p).hash);if(renderedIds.join('|')!==expectedIds.join('|'))throw new Error('photo chronological order failed');$('#photoCommentInput').value='テスト定型文';await saveCurrentCommentAsPreset();if(!siteKV().customPresets.includes('テスト定型文'))throw new Error('custom preset save failed');
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
  const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
