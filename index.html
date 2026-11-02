@@ -61,6 +61,22 @@
       </div>
     </section>
 
+    <section id="workCategoryCard" class="card work-category-card">
+      <div>
+        <p class="eyebrow">施工工程</p>
+        <h2 id="currentWorkCategory">1 / 5　ゴキブリトラップ</h2>
+        <p id="workCategoryHint">固定順です。工程が終わった時だけ「次の施工へ」を押します。</p>
+      </div>
+      <div id="workCategoryChoices" class="work-category-grid" aria-label="施工工程を直接選ぶ">
+        <button type="button" class="work-category-choice" data-work-category="ゴキブリトラップ">1 ゴキブリトラップ</button>
+        <button type="button" class="work-category-choice" data-work-category="ネズミ固形剤">2 ネズミ固形剤</button>
+        <button type="button" class="work-category-choice" data-work-category="ネズミ粉剤">3 ネズミ粉剤</button>
+        <button type="button" class="work-category-choice" data-work-category="衛生管理報告">4 衛生管理報告</button>
+        <button type="button" class="work-category-choice special" data-work-category="特別報告">5 特別報告</button>
+      </div>
+      <button id="nextWorkCategoryButton" type="button" class="secondary next-work-category">次の施工へ</button>
+    </section>
+
     <section id="stageCard" class="card stage-card">
       <div>
         <p class="eyebrow">いま何を撮る？</p>
@@ -187,6 +203,7 @@
       <ol class="usage-steps">
         <li><strong>現場を開く</strong>：前に使った現場なら選ぶだけ。</li>
         <li><strong>店舗外観</strong>：表紙写真が無い時だけ「🏠 外観を撮る」。これは作業写真に入りません。</li>
+        <li><strong>施工工程</strong>：ゴキブリトラップ→ネズミ固形剤→ネズミ粉剤→衛生管理報告→特別報告の固定順。「次の施工へ」を1回押すだけ。</li>
         <li><strong>場所</strong>：最初に1回選ぶ。移動するまでその場所を保持します。</li>
         <li><strong>施工前・作業中・施工後</strong>：最初に1回選ぶ。変わった時だけ押し直します。</li>
         <li><strong>撮影</strong>：写真は古い順に上、新しい写真ほど下へ追加されます。</li>
@@ -200,6 +217,15 @@
   <dialog id="photoDetailDialog">
     <div class="dialog-body">
       <div class="dialog-head"><h2>この写真の記録</h2><button id="closePhotoDetailButton" type="button" class="ghost">閉じる</button></div>
+      <label>施工工程
+        <select id="photoWorkCategorySelect">
+          <option value="ゴキブリトラップ">1 ゴキブリトラップ</option>
+          <option value="ネズミ固形剤">2 ネズミ固形剤</option>
+          <option value="ネズミ粉剤">3 ネズミ粉剤</option>
+          <option value="衛生管理報告">4 衛生管理報告</option>
+          <option value="特別報告">5 特別報告</option>
+        </select>
+      </label>
       <label>区分
         <select id="photoStageSelect">
           <option value="">未選択</option>
@@ -229,6 +255,7 @@
     <article class="photo-item">
       <img alt="現場写真">
       <div class="photo-meta">
+        <span class="photo-work-category"></span>
         <strong class="photo-stage"></strong>
         <span class="photo-comment"></span>
         <strong class="photo-place"></strong>

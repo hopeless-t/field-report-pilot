@@ -2,7 +2,7 @@
 const DB_NAME='field-report-pilot-v1';
 const DB_VERSION=2;
 const $=s=>document.querySelector(s);
-const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null};
+const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null};
 
 const BUILTIN_PRESETS=[
  ['異常なし','異常は確認されませんでした'],
@@ -11,6 +11,20 @@ const BUILTIN_PRESETS=[
  ['侵入痕跡なし','侵入痕跡は確認されませんでした']
 ];
 const STAGE_ORDER=new Map([['施工前',0],['作業中',1],['施工後',2],['確認点',3],['',9]]);
+const WORK_CATEGORIES=['ゴキブリトラップ','ネズミ固形剤','ネズミ粉剤','衛生管理報告','特別報告'];
+const WORK_CATEGORY_ORDER=new Map(WORK_CATEGORIES.map((x,i)=>[x,i]));
+function normalizeWorkCategory(value){return WORK_CATEGORY_ORDER.has(value)?value:''}
+function photoWorkCategory(photo){return normalizeWorkCategory(photo?.workCategory)||inferLegacyWorkCategory(photo)||''}
+function inferLegacyWorkCategory(photo){
+ const text=`${pathLabel(effectivePlace(photo))} ${photoComment(photo)}`;
+ if(/ゴキブリ|ゴキ|粘着トラップ|捕虫/.test(text))return 'ゴキブリトラップ';
+ if(/固形剤|喫食|ベイト/.test(text))return 'ネズミ固形剤';
+ if(/粉剤|粉跡|足跡/.test(text))return 'ネズミ粉剤';
+ if(/衛生管理|衛生|清掃確認/.test(text))return '衛生管理報告';
+ if(/特別報告|特記事項/.test(text))return '特別報告';
+ return '';
+}
+function categoryLabel(value){const i=WORK_CATEGORIES.indexOf(value);return i>=0?`${i+1}. ${value}`:'未分類'}
 const SITE_SEEDS=[
  {match:/^ハイム大川(?:103)?$/,address:'東京都渋谷区本町6-1-22 ハイム大川103'}
 ];
@@ -20,12 +34,16 @@ function isCoverCandidate(photo){const place=pathLabel(effectivePlace(photo));re
 function siteKV(site=state.site){const kv=site?.kvCache||{};return {lastWorkTitle:String(kv.lastWorkTitle||''),recentComments:Array.isArray(kv.recentComments)?kv.recentComments.filter(Boolean).slice(0,8):[],placementCounts:kv.placementCounts&&typeof kv.placementCounts==='object'?kv.placementCounts:{},placementByPhoto:kv.placementByPhoto&&typeof kv.placementByPhoto==='object'?kv.placementByPhoto:{},commentsByPlacement:kv.commentsByPlacement&&typeof kv.commentsByPlacement==='object'?kv.commentsByPlacement:{},customPresets:Array.isArray(kv.customPresets)?kv.customPresets.filter(Boolean).slice(0,12):[]}}
 function fastHash(input){let h=2166136261;for(const ch of String(input)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(16).padStart(8,'0')}
 function photoCapability(photo){
- const place=pathLabel(effectivePlace(photo));const stage=photoStage(photo).trim();const comment=photoComment(photo).trim();const readable=!!imageBlobFromRecord(photo);
+ const place=pathLabel(effectivePlace(photo));const stage=photoStage(photo).trim();const workCategory=photoWorkCategory(photo);const comment=photoComment(photo).trim();const readable=!!imageBlobFromRecord(photo);
  const provenance=photo.placeSnapshot?'capture':photo.placeResolution?'late':'unknown';
- const roles=[stage||'stage-unknown',comment?'commented':'comment-missing',readable?'image-readable':'image-missing',provenance];
- const placement=`${place}|${stage||'未区分'}`;return {hash:fastHash(`${placement}|${roles.join('|')}`),place,stage,roles,placement,readable};
+ const roles=[workCategory||'work-unknown',stage||'stage-unknown',comment?'commented':'comment-missing',readable?'image-readable':'image-missing',provenance];
+ const placement=`${workCategory||'未分類'}|${place}|${stage||'未区分'}`;return {hash:fastHash(`${placement}|${roles.join('|')}`),workCategory,place,stage,roles,placement,readable};
 }
-function placedPhotosForReport(photos){const firstSeen=new Map();photos.forEach((p,i)=>{const place=photoCapability(p).place;if(!firstSeen.has(place))firstSeen.set(place,i)});return photos.slice().sort((a,b)=>{const ca=photoCapability(a),cb=photoCapability(b);const pa=firstSeen.get(ca.place)??9999,pb=firstSeen.get(cb.place)??9999;if(pa!==pb)return pa-pb;const sa=STAGE_ORDER.get(ca.stage)??8,sb=STAGE_ORDER.get(cb.stage)??8;if(sa!==sb)return sa-sb;return String(a.capturedAt).localeCompare(String(b.capturedAt))})}
+function placedPhotosForReport(photos){
+ const firstSeen=new Map();photos.forEach((p,i)=>{const c=photoCapability(p),key=`${c.workCategory}|${c.place}`;if(!firstSeen.has(key))firstSeen.set(key,i)});
+ return photos.slice().sort((a,b)=>{const ca=photoCapability(a),cb=photoCapability(b);const wa=WORK_CATEGORY_ORDER.get(ca.workCategory)??99,wb=WORK_CATEGORY_ORDER.get(cb.workCategory)??99;if(wa!==wb)return wa-wb;const ka=`${ca.workCategory}|${ca.place}`,kb=`${cb.workCategory}|${cb.place}`;const pa=firstSeen.get(ka)??9999,pb=firstSeen.get(kb)??9999;if(pa!==pb)return pa-pb;const sa=STAGE_ORDER.get(ca.stage)??8,sb=STAGE_ORDER.get(cb.stage)??8;if(sa!==sb)return sa-sb;return String(a.capturedAt).localeCompare(String(b.capturedAt))})
+}
+
 async function updateSiteKV(mutator){if(!state.site||state.site.placeholder)return;const next=mutator(siteKV(state.site));state.site={...state.site,kvCache:next,updatedAt:isoNow()};await put('sites',state.site)}
 async function learnComment(comment){const value=String(comment||'').trim();if(!value)return;await updateSiteKV(kv=>({...kv,recentComments:[value,...kv.recentComments.filter(x=>x!==value)].slice(0,8)}))}
 async function learnPlacement(photo){if(!state.site||state.site.placeholder)return;const c=photoCapability(photo);await updateSiteKV(kv=>{const counts={...kv.placementCounts};const byPhoto={...kv.placementByPhoto};const old=byPhoto[photo.id]||'';const next=(c.place==='場所未設定'||!c.stage)?'':c.placement;if(old===next)return kv;if(old){counts[old]=Math.max(0,(counts[old]||1)-1);if(!counts[old])delete counts[old]}if(next){counts[next]=(counts[next]||0)+1;byPhoto[photo.id]=next}else delete byPhoto[photo.id];return {...kv,placementCounts:counts,placementByPhoto:byPhoto}})}
@@ -135,8 +153,8 @@ async function startOrResumeVisit(site){
  site=withSiteSeed(site);await put('sites',site);state.site=site; localStorage.setItem('field-report-last-site',site.id);
  const visits=(await getAll('visits')).filter(v=>v.siteId===site.id).sort((a,b)=>b.startedAt.localeCompare(a.startedAt));
  let v=visits.find(v=>!v.completedAt && v.workDate===localDay());
- if(!v){v={id:uuid(),siteId:site.id,workDate:localDay(),workerName:localStorage.getItem('field-report-last-worker')||'',workTitle:'',specialNotes:'',currentPlaceId:null,currentStage:'',startedAt:isoNow(),completedAt:null};await put('visits',v);state.visit=v;await recordEvent('visit_started')}else state.visit=v;
- state.activePlace=v.currentPlaceId?(site.places||[]).find(p=>p.id===v.currentPlaceId)||null:null;state.activeStage=String(v.currentStage||'');state.resolvingPhotoId=null;state.showUnresolvedOnly=false;
+ if(!v){v={id:uuid(),siteId:site.id,workDate:localDay(),workerName:localStorage.getItem('field-report-last-worker')||'',workTitle:'',specialNotes:'',currentPlaceId:null,currentStage:'',currentWorkCategory:'ゴキブリトラップ',startedAt:isoNow(),completedAt:null};await put('visits',v);state.visit=v;await recordEvent('visit_started')}else state.visit=v;
+ state.activePlace=v.currentPlaceId?(site.places||[]).find(p=>p.id===v.currentPlaceId)||null:null;state.activeStage=String(v.currentStage||'');state.activeWorkCategory=normalizeWorkCategory(v.currentWorkCategory)||'ゴキブリトラップ';state.resolvingPhotoId=null;state.showUnresolvedOnly=false;
  state.photos=(await getByIndex('photos','visitId',v.id)).sort((a,b)=>a.capturedAt.localeCompare(b.capturedAt));
  render();
 }
@@ -153,6 +171,8 @@ function bind(){
  $('#reportCoverPhoto').onchange=e=>previewCoverPhoto(e.target.files?.[0]||null);
  $('#quickCoverPhoto').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:true});
  $('#coverCapture').onchange=e=>saveQuickCover(e.target.files?.[0]||null,{returnToReport:false});
+ document.querySelectorAll('.work-category-choice').forEach(button=>{button.onclick=()=>setWorkCategory(button.dataset.workCategory||'')});
+ $('#nextWorkCategoryButton').onclick=advanceWorkCategory;
  document.querySelectorAll('.stage-choice').forEach(button=>{button.onclick=async()=>{state.activeStage=button.dataset.stage||'';if(state.visit){state.visit={...state.visit,currentStage:state.activeStage};await put('visits',state.visit)}recordEvent('capture_stage_selected',{stage:state.activeStage});setStatus(`${state.activeStage} を保持します。変わるまで選び直し不要です`);render()}});
  $('#placeButton').onclick=()=>openPlaceDialog(null);
  $('#moveButton').onclick=()=>clearActivePlace();
@@ -236,6 +256,11 @@ async function saveReportMeta(){
  await recordEvent('report_metadata_saved',{hasCover:!!imageBlobFromRecord(state.site),hasAddress:!!address,hasWorker:!!state.visit?.workerName,kvLastWorkTitle:siteKV().lastWorkTitle||null});closeReportMeta();setStatus('報告書情報を保存しました。表紙・住所・基本作業は次回も使います');render();
 }
 
+async function setWorkCategory(value){
+ const category=normalizeWorkCategory(value);if(!category)return;state.activeWorkCategory=category;if(state.visit){state.visit={...state.visit,currentWorkCategory:category};await put('visits',state.visit)}await recordEvent('work_category_selected',{workCategory:category});setStatus(`${category} を保持します。工程が変わるまで選び直し不要です`);render()
+}
+async function advanceWorkCategory(){const i=WORK_CATEGORIES.indexOf(state.activeWorkCategory);if(i<0||i>=WORK_CATEGORIES.length-1)return setStatus('特別報告が最後の工程です');await setWorkCategory(WORK_CATEGORIES[i+1])}
+
 async function clearActivePlace(){
  const from=state.activePlace;state.activePlace=null;if(state.visit){state.visit={...state.visit,currentPlaceId:null};await put('visits',state.visit)}await recordEvent('place_transition',{fromPlaceId:from?.id||null,toPlaceId:null,fromPath:from?.path||null,toPath:null,reason:'explicit-unresolved'});setStatus('場所未設定で撮影できます。区分はそのまま保持しています');render()
 }
@@ -296,12 +321,13 @@ async function applyPlace(place){
 
 function openPhotoDetail(photoId){
  const photo=state.photos.find(p=>p.id===photoId);if(!photo)return;
- state.editingPhotoId=photoId;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);renderPresetChoices();$('#makeCoverButton').hidden=!imageBlobFromRecord(photo);$('#photoDetailDialog').showModal();
+ state.editingPhotoId=photoId;$('#photoWorkCategorySelect').value=photoWorkCategory(photo)||state.activeWorkCategory;$('#photoStageSelect').value=photoStage(photo);$('#photoCommentInput').value=photoComment(photo);renderPresetChoices();$('#makeCoverButton').hidden=!imageBlobFromRecord(photo);$('#photoDetailDialog').showModal();
 }
 async function savePhotoDetail(){
  const index=state.photos.findIndex(p=>p.id===state.editingPhotoId);if(index<0)return;
- const stage=$('#photoStageSelect').value;const comment=$('#photoCommentInput').value.trim();
- const next={...state.photos[index],stage,comment};await put('photos',next);state.photos[index]=next;
+ const workCategory=normalizeWorkCategory($('#photoWorkCategorySelect').value)||state.activeWorkCategory;const stage=$('#photoStageSelect').value;const comment=$('#photoCommentInput').value.trim();
+ const next={...state.photos[index],workCategory,stage,comment};await put('photos',next);state.photos[index]=next;
+ if(workCategory&&workCategory!==state.activeWorkCategory){state.activeWorkCategory=workCategory;if(state.visit){state.visit={...state.visit,currentWorkCategory:workCategory};await put('visits',state.visit)}}
  if(stage){state.activeStage=stage;if(state.visit){state.visit={...state.visit,currentStage:stage};await put('visits',state.visit)}}
  await learnComment(comment);await learnCommentForPlacement(next,comment);await learnPlacement(next);await maybePromoteCover(next);const cHash=photoCapability(next).hash;
  await recordEvent('photo_detail_saved',{photoId:next.id,stage,hasComment:!!comment,cHash});
@@ -313,7 +339,7 @@ async function captureFiles(files){
  await ensureWorkingContext();
  for(const file of [...files]){
   const durable=await fileToDurableImage(file);
-  let photo={id:uuid(),visitId:state.visit.id,siteSnapshot:{id:state.site.id,name:state.site.name},placeSnapshot:state.activePlace?{id:state.activePlace.id,path:[...state.activePlace.path]}:null,placeResolution:null,stage:state.activeStage||'',comment:'',capturedAt:isoNow(),name:durable.name,type:durable.type,bytes:durable.bytes};
+  let photo={id:uuid(),visitId:state.visit.id,siteSnapshot:{id:state.site.id,name:state.site.name},placeSnapshot:state.activePlace?{id:state.activePlace.id,path:[...state.activePlace.path]}:null,placeResolution:null,workCategory:state.activeWorkCategory||'ゴキブリトラップ',stage:state.activeStage||'',comment:'',capturedAt:isoNow(),name:durable.name,type:durable.type,bytes:durable.bytes};
   const learned=bestPlacementComment(photo);if(learned)photo={...photo,comment:learned,commentSource:'kv-placement'};
   await put('photos',photo);state.photos.push(photo);await learnPlacement(photo);await maybePromoteCover(photo);const cHash=photoCapability(photo).hash;await recordEvent(photo.placeSnapshot?'capture_resolved':'capture_unresolved',{photoId:photo.id,placeId:photo.placeSnapshot?.id||null,cHash,commentAutofilled:!!learned});
  }
@@ -348,10 +374,10 @@ async function blobToDataURL(blob){return new Promise((res,rej)=>{const r=new Fi
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function buildReportHTML(){
  if(!state.site||!state.visit)throw new Error('report context missing');
- const groups=new Map();
- for(const p of placedPhotosForReport(state.photos)){const label=pathLabel(effectivePlace(p));if(!groups.has(label))groups.set(label,[]);groups.get(label).push(p)}
+ const categoryGroups=new Map(WORK_CATEGORIES.map(x=>[x,new Map()]));const uncategorized=new Map();
+ for(const p of placedPhotosForReport(state.photos)){const category=photoWorkCategory(p);const target=categoryGroups.get(category)||uncategorized;const label=pathLabel(effectivePlace(p));if(!target.has(label))target.set(label,[]);target.get(label).push(p)}
  const sections=[];
- for(const [label,photos] of groups){
+ for(const category of WORK_CATEGORIES){const groups=categoryGroups.get(category);if(!groups?.size)continue;const placeSections=[];for(const [label,photos] of groups){
   const cards=[];
   for(const p of photos){
    const provenance=p.placeSnapshot?'撮影時に確認':p.placeResolution?'後から確認':'未確認';
@@ -360,18 +386,19 @@ async function buildReportHTML(){
    const imageHTML=imageData?`<img src="${imageData}" alt="現場写真">`:`<div class="report-image-missing">画像を読み込めません<br><small>記録・コメントは保持されています</small></div>`;
    cards.push(`<article class="report-photo" data-chash="${capability.hash}" data-placement="${esc(capability.placement)}">${imageHTML}<div><p class="report-stage">${esc(stage)}</p><h3>${esc(label)}</h3><p class="report-comment">${esc(comment)}</p><p class="report-provenance">${esc(provenance)} · ${esc(new Date(p.capturedAt).toLocaleString('ja-JP'))}</p></div></article>`)
   }
-  sections.push(`<section class="report-group"><h2>${esc(label)} <span>${photos.length}枚</span></h2><div class="report-photo-grid">${cards.join('')}</div></section>`)
- }
+  placeSections.push(`<section class="report-group"><h3>${esc(label)} <span>${photos.length}枚</span></h3><div class="report-photo-grid">${cards.join('')}</div></section>`)
+ }sections.push(`<section class="report-work-section" data-work-category="${esc(category)}"><h2>${esc(categoryLabel(category))}</h2>${placeSections.join('')}</section>`)}
+ if(uncategorized.size){const placeSections=[];for(const [label,photos] of uncategorized){const cards=[];for(const p of photos){const provenance=p.placeSnapshot?'撮影時に確認':p.placeResolution?'後から確認':'未確認';const stage=photoStage(p)||'区分未設定',comment=photoComment(p)||'報告文未入力',capability=photoCapability(p),imageData=await imageRecordToDataURL(p);const imageHTML=imageData?`<img src="${imageData}" alt="現場写真">`:`<div class="report-image-missing">画像を読み込めません<br><small>記録・コメントは保持されています</small></div>`;cards.push(`<article class="report-photo" data-chash="${capability.hash}">${imageHTML}<div><p class="report-stage">${esc(stage)}</p><h3>${esc(label)}</h3><p class="report-comment">${esc(comment)}</p><p class="report-provenance">${esc(provenance)}</p></div></article>`)}placeSections.push(`<section class="report-group"><h3>${esc(label)}</h3><div class="report-photo-grid">${cards.join('')}</div></section>`)}sections.push(`<section class="report-work-section uncategorized"><h2>未分類</h2>${placeSections.join('')}</section>`)}
  const displayName=state.site.placeholder?'現場未設定':state.site.name;
  const unresolved=state.photos.filter(isUnresolved).length;
  const coverData=await imageRecordToDataURL(state.site);
  const coverImage=coverData?`<img class="report-cover-image" src="${coverData}" alt="${esc(displayName)} 店舗外観">`:`<button type="button" id="quickCoverButton" class="report-cover-missing">店舗外観写真 未設定<br><small>タップして写真から入れる（次回から自動）</small></button>`;
  const customer=state.site.customerCompany||'';const address=state.site.address||'';const reportTitle=state.site.reportTitle||'作業報告書';const worker=state.visit.workerName||'';const workTitle=state.visit.workTitle||'';const basicWork=state.site.basicWork||'';const specialNotes=state.visit.specialNotes||'';
  const cover=`<section class="report-cover"><p class="report-cover-kicker">${esc(reportTitle)}</p><h1>${esc(displayName)}</h1>${address?`<p class="report-cover-address">${esc(address)}</p>`:''}${coverImage}<dl class="report-cover-meta"><div><dt>施工日時</dt><dd>${esc(state.visit.workDate)}</dd></div><div><dt>作業責任者</dt><dd>${esc(worker||'未入力')}</dd></div>${customer?`<div><dt>顧客・会社名</dt><dd>${esc(customer)}</dd></div>`:''}${workTitle?`<div><dt>今回の作業</dt><dd>${esc(workTitle)}</dd></div>`:''}</dl>${basicWork?`<section class="report-basic-work"><h2>基本作業</h2><p>${esc(basicWork)}</p></section>`:''}<footer>株式会社ガヤ・コーポレーション</footer></section>`;
- const notes=`<section class="report-special"><h2>特別報告事項</h2><h3>【所見・備考】</h3><p>${esc(specialNotes||'特記事項なし')}</p></section>`;
+ const notes=`<section class="report-special"><h2>5. 特別報告</h2><h3>【所見・備考】</h3><p>${esc(specialNotes||'特記事項なし')}</p></section>`;
  const reportBody=`<section class="report-body"><header><p class="eyebrow">FIELD REPORT</p><h1>${esc(workTitle||'作業報告')}</h1><p>${esc(displayName)} · ${esc(state.visit.workDate)} · 写真 ${state.photos.length}枚</p></header>${sections.join('')}${notes}</section>`;
  const body=`<article class="report-document">${cover}${reportBody}</article>`;
- const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(displayName)} Field REPORT</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;color:#191a17;max-width:900px;margin:auto;padding:28px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.12em;color:#66685f}.report-cover{text-align:center;min-height:calc(100vh - 56px);display:flex;flex-direction:column;justify-content:flex-start}.report-cover-kicker{font-size:28px;font-weight:800;margin:18px 0 24px}.report-cover h1{font-size:32px;margin:0}.report-cover-address{margin:8px 0 24px}.report-cover-image,.report-cover-missing{width:100%;height:420px;object-fit:cover;background:#f0f0eb;border-radius:6px}.report-cover-missing{display:grid;place-items:center;color:#777}.report-cover-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;text-align:left;margin:24px auto 12px;max-width:620px}.report-cover-meta div{display:grid;grid-template-columns:110px 1fr}.report-cover-meta dt{font-weight:700}.report-cover-meta dd{margin:0}.report-basic-work{text-align:left;max-width:620px;margin:12px auto}.report-basic-work h2{font-size:15px}.report-basic-work p{white-space:pre-wrap}.report-cover footer{margin-top:auto;padding-top:20px;font-size:18px;font-weight:800}.report-body>header{margin-bottom:28px}.report-body>header h1{font-size:30px}.report-group{margin:30px 0}.report-group h2{border-bottom:1px solid #ddd;padding-bottom:8px}.report-group h2 span{font-size:14px;color:#666}.report-photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.report-photo{break-inside:avoid;margin:0 0 10px}.report-photo img,.report-image-missing{width:100%;aspect-ratio:4/3;object-fit:cover;background:#f4f4ef;border-radius:4px}.report-image-missing{display:grid;place-items:center;text-align:center;color:#777}.report-image-missing small{font-size:11px}.report-photo h3{margin:9px 0 2px}.report-photo p{margin:0;color:#666}.report-comment{color:#333!important;white-space:pre-wrap}.report-provenance{font-size:11px}.report-special{break-inside:avoid;margin-top:40px;border-top:2px solid #b33;padding-top:14px}.report-special p{white-space:pre-wrap;background:#fff6d9;padding:18px;min-height:80px}@media(max-width:620px){.report-photo-grid{grid-template-columns:1fr}.report-cover-image,.report-cover-missing{height:46vh}.report-cover-meta{grid-template-columns:1fr}}@media print{body{padding:0;max-width:none}.report-cover{height:100vh;min-height:0;break-after:page}.report-body{break-before:page}.report-photo{page-break-inside:avoid}.report-photo-grid{grid-template-columns:1fr 1fr}}</style></head><body>${body}</body></html>`;
+ const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(displayName)} Field REPORT</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;color:#191a17;max-width:900px;margin:auto;padding:28px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.12em;color:#66685f}.report-cover{text-align:center;min-height:calc(100vh - 56px);display:flex;flex-direction:column;justify-content:flex-start}.report-cover-kicker{font-size:28px;font-weight:800;margin:18px 0 24px}.report-cover h1{font-size:32px;margin:0}.report-cover-address{margin:8px 0 24px}.report-cover-image,.report-cover-missing{width:100%;height:420px;object-fit:cover;background:#f0f0eb;border-radius:6px}.report-cover-missing{display:grid;place-items:center;color:#777}.report-cover-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;text-align:left;margin:24px auto 12px;max-width:620px}.report-cover-meta div{display:grid;grid-template-columns:110px 1fr}.report-cover-meta dt{font-weight:700}.report-cover-meta dd{margin:0}.report-basic-work{text-align:left;max-width:620px;margin:12px auto}.report-basic-work h2{font-size:15px}.report-basic-work p{white-space:pre-wrap}.report-cover footer{margin-top:auto;padding-top:20px;font-size:18px;font-weight:800}.report-body>header{margin-bottom:28px}.report-body>header h1{font-size:30px}.report-work-section{margin:34px 0}.report-work-section>h2{border-bottom:2px solid #222;padding-bottom:9px}.report-group{margin:22px 0}.report-group h3{border-bottom:1px solid #ddd;padding-bottom:8px}.report-group h3 span{font-size:14px;color:#666}.report-photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.report-photo{break-inside:avoid;margin:0 0 10px}.report-photo img,.report-image-missing{width:100%;aspect-ratio:4/3;object-fit:cover;background:#f4f4ef;border-radius:4px}.report-image-missing{display:grid;place-items:center;text-align:center;color:#777}.report-image-missing small{font-size:11px}.report-photo h3{margin:9px 0 2px}.report-photo p{margin:0;color:#666}.report-comment{color:#333!important;white-space:pre-wrap}.report-provenance{font-size:11px}.report-special{break-inside:avoid;margin-top:40px;border-top:2px solid #b33;padding-top:14px}.report-special p{white-space:pre-wrap;background:#fff6d9;padding:18px;min-height:80px}@media(max-width:620px){.report-photo-grid{grid-template-columns:1fr}.report-cover-image,.report-cover-missing{height:46vh}.report-cover-meta{grid-template-columns:1fr}}@media print{body{padding:0;max-width:none}.report-cover{height:100vh;min-height:0;break-after:page}.report-body{break-before:page}.report-photo{page-break-inside:avoid}.report-photo-grid{grid-template-columns:1fr 1fr}}</style></head><body>${body}</body></html>`;
  state.reportHTML=html;
  state.reportFilename=`Field-REPORT-${state.visit.workDate}-${safeFilename(displayName)}.html`;
  return {html,body,displayName,unresolved};
@@ -415,9 +442,10 @@ async function drawPDFPhotoCard(ctx,photo,x,y,w,h){
  const place=pathLabel(effectivePlace(photo)),stage=photoStage(photo)||'区分未設定',comment=photoComment(photo)||'報告文未入力';let ty=y+imageH+42;ctx.fillStyle='#111';ctx.font='800 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(stage,x+22,ty);ty+=42;ctx.font='700 28px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(place,x+22,ty);ty+=40;ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#333';drawCanvasText(ctx,comment,x+22,ty,w-44,31,4)
 }
 async function renderBodyPDFPages(){
- const photos=placedPhotosForReport(state.photos),pages=[],perPage=4;for(let offset=0;offset<photos.length;offset+=perPage){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#111';ctx.font='800 42px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(state.visit?.workTitle||'作業報告',70,85);ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#666';ctx.fillText(`${state.site?.name||'現場'} ・ ${state.visit?.workDate||''}`,70,125);const subset=photos.slice(offset,offset+perPage);for(let i=0;i<subset.length;i++){const col=i%2,row=Math.floor(i/2);await drawPDFPhotoCard(ctx,subset[i],70+col*570,170+row*730,530,680)}pages.push(c)}
- if(state.visit?.specialNotes){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#b33';ctx.font='800 44px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('特別報告事項',80,120);ctx.fillStyle='#111';ctx.font='700 34px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('【所見・備考】',80,190);ctx.fillStyle='#fff4cf';ctx.fillRect(80,240,1080,1180);ctx.fillStyle='#222';ctx.font='500 30px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';drawCanvasText(ctx,state.visit.specialNotes,120,300,1000,44,24);pages.push(c)}return pages
+ const pages=[];for(const category of WORK_CATEGORIES){const photos=placedPhotosForReport(state.photos).filter(p=>photoWorkCategory(p)===category);for(let offset=0;offset<photos.length;offset+=4){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#111';ctx.font='800 42px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText(categoryLabel(category),70,85);ctx.font='500 24px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillStyle='#666';ctx.fillText(`${state.site?.name||'現場'} ・ ${state.visit?.workDate||''}`,70,125);const subset=photos.slice(offset,offset+4);for(let i=0;i<subset.length;i++){const col=i%2,row=Math.floor(i/2);await drawPDFPhotoCard(ctx,subset[i],70+col*570,170+row*730,530,680)}pages.push(c)}}
+ if(state.visit?.specialNotes){const c=newPDFCanvas(),ctx=c.getContext('2d');ctx.fillStyle='#b33';ctx.font='800 44px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('5. 特別報告',80,120);ctx.fillStyle='#111';ctx.font='700 34px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';ctx.fillText('【所見・備考】',80,190);ctx.fillStyle='#fff4cf';ctx.fillRect(80,240,1080,1180);ctx.fillStyle='#222';ctx.font='500 30px -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif';drawCanvasText(ctx,state.visit.specialNotes,120,300,1000,44,24);pages.push(c)}return pages
 }
+
 async function canvasJpegBytes(canvas){const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('JPEG conversion failed')),'image/jpeg',0.9));return {bytes:new Uint8Array(await blob.arrayBuffer()),width:canvas.width,height:canvas.height}}
 function buildRasterPDF(images){
  const enc=new TextEncoder(),chunks=[],offsets=[0];let offset=0;const push=x=>{const b=typeof x==='string'?enc.encode(x):x;chunks.push(b);offset+=b.length};const obj=(n,body)=>{offsets[n]=offset;push(`${n} 0 obj\n`);push(body);push(`\nendobj\n`)};push('%PDF-1.4\n%FIELDREPORT\n');const count=images.length,objCount=2+count*3;obj(1,'<< /Type /Catalog /Pages 2 0 R >>');const kids=images.map((_,i)=>`${3+i*3} 0 R`).join(' ');obj(2,`<< /Type /Pages /Kids [${kids}] /Count ${count} >>`);
@@ -458,6 +486,7 @@ function render(){
  $('#siteButton').textContent='現場を切り替える';
  $('#startCard').hidden=hasNamedSite;
  $('#placeCard').hidden=!hasNamedSite;
+ $('#workCategoryCard').hidden=!hasNamedSite;
  $('#stageCard').hidden=!hasNamedSite;
  $('#mainCaptureZone').hidden=stage==='site';
  $('#recordCard').hidden=!state.photos.length;
@@ -469,6 +498,7 @@ function render(){
  renderQuickPlaces();
  $('#placeButton').hidden=false;
  $('#placeButton').textContent=state.site?.places?.length?'＋ 場所':'場所を決める';
+ const workIndex=Math.max(0,WORK_CATEGORIES.indexOf(state.activeWorkCategory));$('#currentWorkCategory').textContent=`${workIndex+1} / 5　${state.activeWorkCategory}`;document.querySelectorAll('.work-category-choice').forEach(button=>button.classList.toggle('active',button.dataset.workCategory===state.activeWorkCategory));const nextCategory=WORK_CATEGORIES[workIndex+1];$('#nextWorkCategoryButton').hidden=!nextCategory;$('#nextWorkCategoryButton').textContent=nextCategory?`次の施工へ → ${nextCategory}`:'これが最後の施工です';
  $('#currentStage').textContent=state.activeStage||'区分未設定';
  document.querySelectorAll('.stage-choice').forEach(button=>button.classList.toggle('active',button.dataset.stage===state.activeStage));
  $('#stageHint').textContent=state.activeStage?`${state.activeStage} を次の写真へ引き継ぎます。変わった時だけ押し直します。`:'区分は後からでも付けられます。今分かるなら一度だけ選んでください。';
@@ -481,7 +511,7 @@ function render(){
  $('#unresolvedButton').textContent=state.showUnresolvedOnly?'すべて見る':`未確認 ${unresolved}`;
  $('#unresolvedButton').disabled=!unresolved && !state.showUnresolvedOnly;
  $('#unresolvedButton').classList.toggle('active',state.showUnresolvedOnly);
- const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const coverAction=node.querySelector('.photo-cover-action');const isCurrentCover=state.site?.coverPhotoSource?.photoId===p.id;coverAction.hidden=!isCurrentCover&&!isCoverCandidate(p);coverAction.textContent=isCurrentCover?'表紙 ✓':'表紙';coverAction.onclick=()=>confirmCoverPhoto(p.id,false);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
+ const grid=$('#photoGrid');grid.innerHTML='';const visible=state.showUnresolvedOnly?state.photos.filter(isUnresolved):state.photos;$('#emptyPhotos').hidden=visible.length>0;$('#emptyPhotos').textContent=state.showUnresolvedOnly?'場所未確認の写真はありません。':'まだ写真はありません。';visible.forEach(p=>{const node=$('#photoTemplate').content.cloneNode(true);const card=node.querySelector('.photo-item');const capability=photoCapability(p);if(card){card.dataset.chash=capability.hash;card.dataset.placement=capability.placement}const img=node.querySelector('img');const url=imageRecordObjectURL(p);if(url){img.src=url;img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>{URL.revokeObjectURL(url);imageRecordToDataURL(p).then(data=>{if(data){img.onerror=()=>{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')};img.src=data}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}})}}else{img.removeAttribute('src');img.alt='画像を読み込めません';img.classList.add('image-missing')}node.querySelector('.photo-work-category').textContent=categoryLabel(photoWorkCategory(p));node.querySelector('.photo-place').textContent=pathLabel(effectivePlace(p));node.querySelector('.photo-time').textContent=new Date(p.capturedAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});node.querySelector('.photo-stage').textContent=photoStage(p)||'区分未設定';node.querySelector('.photo-comment').textContent=photoComment(p)||'報告文未入力';const detailAction=node.querySelector('.photo-detail-action');detailAction.onclick=()=>openPhotoDetail(p.id);const coverAction=node.querySelector('.photo-cover-action');const isCurrentCover=state.site?.coverPhotoSource?.photoId===p.id;coverAction.hidden=!isCurrentCover&&!isCoverCandidate(p);coverAction.textContent=isCurrentCover?'表紙 ✓':'表紙';coverAction.onclick=()=>confirmCoverPhoto(p.id,false);const provenance=node.querySelector('.photo-provenance');const action=node.querySelector('.photo-action');if(p.placeSnapshot){provenance.textContent='撮影時に場所確認';action.hidden=true}else if(p.placeResolution){provenance.textContent='撮影時未確認 → 後から確認';action.hidden=true}else{provenance.textContent='場所はまだ未確認';action.hidden=false;action.onclick=()=>openPlaceDialog(p.id)}grid.append(node)});
  const completed=!!state.visit?.completedAt;
  $('#finishButton').hidden=completed;
  $('#finishButton').disabled=!state.visit||completed;
@@ -510,7 +540,7 @@ async function runSelfTest(){
  // Simulate a legacy iOS/WKWebView record whose image payload can no longer be read.
  const degraded={...state.photos[2],bytes:null,blob:null};await put('photos',degraded);state.photos[2]=degraded;
  const summary=await semanticStagnationSummary();if(summary.unresolvedCount!==1||summary.lateResolutionCount<1||summary.blockedCaptureCount!==0)throw new Error('stagnation ledger mismatch');const placed=placedPhotosForReport(state.photos.slice(0,2));if(placed[0].id!==state.photos[1].id)throw new Error('cHash placement failed');
- await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
+ await updateSiteKV(kv=>({...kv,lastWorkTitle:'防鼠防虫作業'}));const firstVisit=state.visit.id;await finishVisit();if(!state.visit.completedAt)throw new Error('completion failed');await openReportPreview();if(!$('#reportDialog').open||$('#reportPreview').querySelectorAll('.report-photo').length!==3||!$('#reportPreview').querySelector('.report-cover')||$('#reportPreview').querySelectorAll('.report-image-missing').length!==1)throw new Error('in-app degraded-image report preview failed');const sectionLabels=[...$('#reportPreview').querySelectorAll('.report-work-section>h2')].map(x=>x.textContent);if(sectionLabels[0]!=='1. ゴキブリトラップ')throw new Error('report work order failed');const pdf=await generatePDFFile();const head=new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()).slice(0,5));if(head!=='%PDF-'||pdf.size<1000)throw new Error('real PDF generation failed');$('#reportDialog').close();await startOrResumeVisit(state.site);if(state.visit.id===firstVisit)throw new Error('new visit not created');if(!state.site.places.some(p=>pathLabel(p.path)==='1F・厨房'))throw new Error('site memory lost');if(state.activePlace!==null)throw new Error('old authority restored');if(siteKV().lastWorkTitle!=='防鼠防虫作業'||!siteKV().recentComments.includes('異常は確認されませんでした'))throw new Error('KV cache lost');if(siteKV().placementCounts['ゴキブリトラップ|1F・厨房|施工前']!==1)throw new Error('cHash placement double-counted');openReportMeta();if($('#reportWorkTitle').value!==''||$('#reportKVHints').hidden||!$('#reportKVHints').textContent.includes('防鼠防虫作業'))throw new Error('KV suggestion authority boundary failed');closeReportMeta();
  document.body.dataset.selftest='pass';document.body.dataset.unresolved='1';setStatus('SELFTEST PASS');
 }
 
