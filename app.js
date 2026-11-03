@@ -2,7 +2,7 @@
 const DB_NAME='field-report-pilot-v1';
 const DB_VERSION=2;
 const $=s=>document.querySelector(s);
-const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false};
+const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false,hatStep:null,hatEnteredAt:Date.now()};
 
 const BUILTIN_PRESETS=[
  ['異常なし','異常は確認されませんでした'],
@@ -192,6 +192,9 @@ function bind(){
  $('#printReportButton').onclick=savePDFReport;
  $('#printOnlyButton').onclick=()=>window.print();
  $('#installHelpButton').onclick=()=>$('#installDialog').showModal();
+ $('#journeyPrimaryAction').onclick=runJourneyPrimaryAction;
+ $('#journeySecondaryAction').onclick=runJourneySecondaryAction;
+ document.addEventListener('click',observeHumanAction,{capture:true});
  $('#closeInstallButton').onclick=()=>$('#installDialog').close();
  $('#closePhotoDetailButton').onclick=()=>$('#photoDetailDialog').close();
  $('#savePhotoDetailButton').onclick=savePhotoDetail;
@@ -519,17 +522,83 @@ async function semanticStagnationSummary(){
  const now=Date.now();const unresolved=state.photos.filter(isUnresolved);const events=await getAll('events');return {unresolvedCount:unresolved.length,unresolvedAgeMs:unresolved.reduce((n,p)=>n+Math.max(0,now-new Date(p.capturedAt).getTime()),0),lateResolutionCount:events.filter(e=>e.type==='photo_late_resolved').length,eventCount:events.length,blockedCaptureCount:0};
 }
 
+const JOURNEY_ORDER=['site','place','stage','photo','report'];
+function currentJourneyStep(){
+ if(!state.site||state.site.placeholder)return 'site';
+ if(state.visit?.completedAt)return 'report';
+ if(!state.activePlace)return 'place';
+ if(!state.activeStage)return 'stage';
+ return 'photo';
+}
+function journeyModel(){
+ const step=currentJourneyStep();
+ const hasPhotos=state.photos.length>0;
+ if(step==='site')return {step,title:'現場を開く',hint:'今日の現場を選びます。現場名がまだ分からなければ、保存済み写真の取り込みを先にしても大丈夫です。',primary:'現場を開く',secondary:'現場名はあとで → 写真を選ぶ'};
+ if(step==='place')return {step,title:'場所を1回選ぶ',hint:'いま撮る場所を選びます。移動するまでそのまま保持します。',primary:'場所を選ぶ',secondary:'場所未設定で写真を選ぶ'};
+ if(step==='stage')return {step,title:'区分を1回選ぶ',hint:'施工前 / 作業中 / 施工後 / 確認点。変わるまで選び直しません。',primary:'区分を選ぶ',secondary:'区分未設定で写真を選ぶ'};
+ if(step==='report')return {step,title:'報告を確認する',hint:'現場は完了済みです。報告を確認してPDFまたはPC編集HTMLへ進めます。',primary:'報告を見る',secondary:''};
+ return {step,title:hasPhotos?'次の写真を追加する':'写真を取り込む',hint:hasPhotos?`現在 ${state.photos.length}枚。撮影を続けるなら写真を追加、終わったら報告へ進みます。`:'iPhone標準カメラで撮影済みの写真を選びます。原本は写真アプリに残ります。',primary:hasPhotos?'写真を追加':'写真を選ぶ',secondary:hasPhotos?'撮影終了 → 報告':''};
+}
+function focusJourneyTarget(selector){const el=$(selector);if(!el)return;el.scrollIntoView({behavior:'smooth',block:'center'});el.classList.add('journey-pulse');setTimeout(()=>el.classList.remove('journey-pulse'),900)}
+function runJourneyPrimaryAction(){
+ const m=journeyModel();recordEvent('hat_primary_action',{step:m.step,action:m.primary,dwellMs:Math.max(0,Date.now()-state.hatEnteredAt)});
+ if(m.step==='site')return $('#startSiteButton').click();
+ if(m.step==='place')return $('#placeButton').click();
+ if(m.step==='stage')return focusJourneyTarget('#stageCard');
+ if(m.step==='photo')return $('#photoImport').click();
+ if(m.step==='report')return openReportPreview();
+}
+function runJourneySecondaryAction(){
+ const m=journeyModel();recordEvent('hat_secondary_action',{step:m.step,action:m.secondary,dwellMs:Math.max(0,Date.now()-state.hatEnteredAt)});
+ if(m.step==='site'||m.step==='place'||m.step==='stage')return $('#photoImport').click();
+ if(m.step==='photo'&&state.photos.length)return requestFinish();
+}
+function renderJourney(){
+ const m=journeyModel(),idx=JOURNEY_ORDER.indexOf(m.step);$('#journeyTitle').textContent=m.title;$('#journeyHint').textContent=m.hint;$('#journeyProgress').textContent=`${idx+1} / ${JOURNEY_ORDER.length}`;$('#journeyPrimaryAction').textContent=m.primary;const secondary=$('#journeySecondaryAction');secondary.textContent=m.secondary;secondary.hidden=!m.secondary;
+ document.querySelectorAll('[data-journey-step]').forEach((el,i)=>{el.classList.toggle('done',i<idx);el.classList.toggle('active',i===idx);el.setAttribute('aria-current',i===idx?'step':'false')});
+ observeJourneyState(m.step);
+}
+function observeJourneyState(step){
+ const now=Date.now();if(state.hatStep===step)return;
+ if(state.hatStep&&state.db)recordEvent('hat_state_exit',{step:state.hatStep,dwellMs:Math.max(0,now-state.hatEnteredAt),photoCount:state.photos.length}).catch(()=>{});
+ state.hatStep=step;state.hatEnteredAt=now;
+ if(state.db)recordEvent('hat_state_enter',{step,photoCount:state.photos.length,hasPlace:!!state.activePlace,stage:state.activeStage||null,workCategory:state.activeWorkCategory||null}).catch(()=>{});
+}
+function humanControlKey(el){
+ if(el.id)return `id:${el.id}`;const target=el.getAttribute?.('for');if(target)return `for:${target}`;
+ for(const cls of ['quick-place','work-category-choice','stage-choice','preset-choice','site-choice','place-choice','photo-detail-action','photo-action','photo-cover-action','manual-link'])if(el.classList?.contains(cls))return `class:${cls}`;
+ if(el.tagName==='SUMMARY')return 'summary:utility-menu';return `tag:${String(el.tagName||'unknown').toLowerCase()}`;
+}
+function observeHumanAction(event){
+ const el=event.target?.closest?.('button,a,label,summary');if(!el||!state.db)return;
+ recordEvent('hat_action',{step:currentJourneyStep(),control:humanControlKey(el),dwellMs:Math.max(0,Date.now()-state.hatEnteredAt)}).catch(()=>{});
+}
+async function humanAttentionSummary(){
+ const events=(await getAll('events')).filter(e=>String(e.type||'').startsWith('hat_')).sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+ const dwellByStep={},actions={},enters=[];let backtracks=0;
+ for(const e of events){
+  if(e.type==='hat_state_exit'&&e.step)dwellByStep[e.step]=(dwellByStep[e.step]||0)+Math.max(0,Number(e.dwellMs)||0);
+  if(e.type==='hat_action'&&e.control)actions[e.control]=(actions[e.control]||0)+1;
+  if(e.type==='hat_state_enter'&&e.step){const prev=enters.at(-1);if(prev&&JOURNEY_ORDER.indexOf(e.step)<JOURNEY_ORDER.indexOf(prev))backtracks++;enters.push(e.step)}
+ }
+ const slowestStep=Object.entries(dwellByStep).sort((a,b)=>b[1]-a[1])[0]||null;
+ const repeatedActions=Object.entries(actions).filter(([,n])=>n>1).sort((a,b)=>b[1]-a[1]);
+ return {schema:'field-report.human-attention-summary/v0',eventCount:events.length,dwellByStep,slowestStep:slowestStep?{step:slowestStep[0],dwellMs:slowestStep[1]}:null,backtrackCount:backtracks,repeatedActions:repeatedActions.map(([control,count])=>({control,count})),currentStep:currentJourneyStep(),mutationAuthority:'NONE',privacy:'control-keys-only; no typed report text or site/place labels'};
+}
+
 function renderSites(){getAll('sites').then(sites=>{$('#siteList').innerHTML='';sites.filter(s=>!s.placeholder).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).forEach(s=>{const b=document.createElement('button');b.type='button';b.className='site-choice';b.innerHTML=`<strong>${esc(s.placeholder?'現場未設定':s.name)}</strong><small>覚えている場所 ${s.places.length}件</small>`;b.onclick=()=>selectSite(s.id);$('#siteList').append(b)});if(!sites.some(s=>!s.placeholder))$('#siteList').innerHTML='<p class="empty">保存済みの現場はまだありません。</p>'})}
 function renderPlaces(){const root=$('#placeList');root.innerHTML='';if(!state.site){root.innerHTML='<p class="empty">場所はあとで決められます。まず撮影できます。</p>';return}state.site.places.forEach(p=>{const b=document.createElement('button');b.type='button';b.className='place-choice';b.textContent=pathLabel(p.path);b.onclick=()=>selectPlace(p.id);root.append(b)});if(!state.site.places.length)root.innerHTML='<p class="empty">場所はまだありません。必要になった場所だけ追加してください。</p>'}
 function nextStepText(){
- if(!state.site)return 'そのまま撮影できます。現場名はあとで決められます。';
- if(state.site.placeholder)return '撮影を続けられます。現場名は分かった時に決めれば大丈夫です。';
- if(state.visit?.completedAt)return '今日の現場は完了です。必要なら報告を作って共有できます。';
+ if(!state.site||state.site.placeholder)return 'まず現場を開く。現場名がまだ分からなければ保存済み写真の取り込みを先にできます。';
+ if(state.visit?.completedAt)return '今日の現場は完了です。報告を確認して共有できます。';
+ if(!state.activePlace)return '場所を1回選びます。移動するまで保持されます。';
+ if(!state.activeStage)return '施工前 / 作業中 / 施工後 / 確認点を1回選びます。';
  const unresolved=state.photos.filter(isUnresolved).length;
- if(unresolved)return `撮影を続けられます。場所未確認 ${unresolved}枚は最後にその枚数だけ確認できます。`;
- if(!state.photos.length)return '場所を1回選んで撮影。移動したら次の場所を1タップするだけです。';
- return '撮影を続ける。終わったら「今日の現場を完了する」で今日を閉じます。';
+ if(unresolved)return `撮影を続けられます。場所未確認 ${unresolved}枚は後から確認できます。`;
+ if(!state.photos.length)return '標準カメラで撮影済みの写真を選びます。原本は写真アプリに残ります。';
+ return '写真を追加するか、撮影が終わったら報告へ進みます。';
 }
+
 function render(){
  const hasNamedSite=!!state.site&&!state.site.placeholder;
  const stage=!hasNamedSite?'site':state.activePlace?'capture':'place';
@@ -574,6 +643,7 @@ function render(){
  const savePhotosButton=$('#savePhotosButton');if(savePhotosButton){const savable=capturedPhotoFiles().length;savePhotosButton.textContent=savable?`写真アプリへ保存（${savable}枚）`:'写真アプリへ保存';savePhotosButton.disabled=!savable}
  const standalone=window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
  $('#installHelpButton').hidden=standalone;
+ renderJourney();
  $('#nextStep').textContent=nextStepText();
 }
 function setStatus(s){$('#status').textContent=s}
@@ -581,7 +651,7 @@ function setStatus(s){$('#status').textContent=s}
 async function runSelfTest(){
  // Shutter first: no site setup is allowed to block evidence capture.
  if(withSiteSeed({name:'ハイム大川',address:''}).address!=='東京都渋谷区本町6-1-22 ハイム大川103')throw new Error('site KV seed failed');
- const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'library'});if(state.photos[0].captureSource!=='library')throw new Error('safe import source failed');
+ const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'library'});if(state.photos[0].captureSource!=='library')throw new Error('safe import source failed');if(!$('#journeyRail')||!$('#journeyPrimaryAction')||JOURNEY_ORDER.length!==5)throw new Error('human journey rail missing');const hat0=await humanAttentionSummary();if(hat0.mutationAuthority!=='NONE'||!hat0.privacy.includes('control-keys-only'))throw new Error('HAT privacy/authority contract failed');
  if(!state.site?.placeholder||state.photos.length!==1||!isUnresolved(state.photos[0]))throw new Error('shutter-first failed');
  const originalSiteId=state.site.id;state.site={...state.site,name:'SELFTEST現場',placeholder:false,updatedAt:isoNow()};await put('sites',state.site);if(state.site.id!==originalSiteId)throw new Error('site identity changed while naming');
  const place={id:uuid(),path:['1F','厨房'],createdAt:isoNow()};state.site.places.push(place);await put('sites',state.site);state.activePlace=place;state.activeStage='施工前';

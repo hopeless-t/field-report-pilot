@@ -22,11 +22,38 @@
       </div>
       <div class="hero-actions">
         <button id="siteButton" class="ghost compact-action">現場を切り替える</button>
-        <button id="reportMetaButton" class="ghost compact-action" type="button">報告書情報</button>
-        <button id="helpButton" class="ghost compact-action" type="button">使い方</button>
-        <a class="ghost compact-action manual-link" href="manual.html" target="_blank" rel="noopener">マニュアル</a>
+        <details id="utilityMenu" class="utility-menu">
+          <summary class="ghost compact-action">その他</summary>
+          <div class="utility-menu-panel">
+            <button id="reportMetaButton" class="ghost compact-action" type="button">報告書情報</button>
+            <button id="helpButton" class="ghost compact-action" type="button">使い方</button>
+            <a class="ghost compact-action manual-link" href="manual.html" target="_blank" rel="noopener">マニュアル</a>
+          </div>
+        </details>
       </div>
     </header>
+
+    <section id="journeyRail" class="journey-rail" aria-live="polite">
+      <div class="journey-heading">
+        <div>
+          <p class="eyebrow">いまやること</p>
+          <h2 id="journeyTitle">現場を開く</h2>
+        </div>
+        <span id="journeyProgress" class="journey-progress">1 / 5</span>
+      </div>
+      <div class="journey-steps" aria-label="Field REPORTの進行状況">
+        <span data-journey-step="site">現場</span>
+        <span data-journey-step="place">場所</span>
+        <span data-journey-step="stage">区分</span>
+        <span data-journey-step="photo">写真</span>
+        <span data-journey-step="report">報告</span>
+      </div>
+      <p id="journeyHint" class="journey-hint">今日の現場を1つ選びます。</p>
+      <div class="journey-actions">
+        <button id="journeyPrimaryAction" type="button" class="primary journey-primary">現場を開く</button>
+        <button id="journeySecondaryAction" type="button" class="ghost journey-secondary" hidden></button>
+      </div>
+    </section>
 
     <section id="startCard" class="start-card">
       <p class="eyebrow">まずここから</p>
