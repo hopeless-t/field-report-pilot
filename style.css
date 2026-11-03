@@ -84,3 +84,10 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 /* The Journey Rail owns the first action; the old start card is context, not a second command center. */
 .journey-rail + .start-card{background:#fff;color:#191a17;border:1px solid #dedfd7;box-shadow:0 6px 24px rgba(0,0,0,.035);padding:18px}
 .journey-rail + .start-card .eyebrow{color:#66685f}.journey-rail + .start-card p:not(.eyebrow){color:#6b6d65}.journey-rail + .start-card .start-primary,.journey-rail + .start-card .text-escape{display:none!important}
+
+/* HAT readback: narrow screens must never expand the page from a long site name. */
+.shell{grid-template-columns:minmax(0,1fr)}
+.shell>*,.hero,.hero>div:first-child,.journey-rail,.journey-heading>div{min-width:0;max-width:100%}
+.hero h1{overflow-wrap:anywhere;word-break:normal}
+.hero-actions{flex-shrink:0}
+@media(max-width:390px){.hero-actions{max-width:126px}.hero h1{font-size:clamp(24px,7vw,32px)}.journey-steps{min-width:0}.journey-steps span{min-width:0}}

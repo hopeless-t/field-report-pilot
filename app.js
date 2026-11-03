@@ -2,7 +2,7 @@
 const DB_NAME='field-report-pilot-v1';
 const DB_VERSION=2;
 const $=s=>document.querySelector(s);
-const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false,hatStep:null,hatEnteredAt:Date.now()};
+const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false,hatStep:null,hatEnteredAt:Date.now(),hatSessionId:null,hatSequence:0,hatOrigin:'INTERACTION_PROXY'};
 
 const BUILTIN_PRESETS=[
  ['異常なし','異常は確認されませんでした'],
@@ -127,9 +127,10 @@ function tx(store,mode='readonly'){return state.db.transaction(store,mode).objec
 function put(store,val){return new Promise((res,rej)=>{const r=tx(store,'readwrite').put(val);r.onsuccess=()=>res(val);r.onerror=()=>rej(r.error)})}
 function getAll(store){return new Promise((res,rej)=>{const r=tx(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 function getByIndex(store,index,key){return new Promise((res,rej)=>{const r=tx(store).index(index).getAll(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function recordEvent(type,detail={}){if(!state.db)return;try{await put('events',{id:uuid(),type,at:isoNow(),siteId:state.site?.id||null,visitId:state.visit?.id||null,...detail})}catch(e){console.warn('ledger event failed',type,e)}}
+async function recordEvent(type,detail={}){if(!state.db)return;try{const hat=type.startsWith('hat_')?{hatSessionId:state.hatSessionId,hatOrigin:state.hatOrigin,hatSequence:++state.hatSequence}:{};await put('events',{id:uuid(),type,at:isoNow(),siteId:state.site?.id||null,visitId:state.visit?.id||null,...hat,...detail})}catch(e){console.warn('ledger event failed',type,e)}}
 
 async function init(){
+ const hatQuery=new URLSearchParams(location.search);state.hatSessionId=uuid();state.hatOrigin=hatQuery.get('selftest')==='1'?'SYNTHETIC_SELFTEST':hatQuery.get('ux_probe')==='1'?'SYNTHETIC_PROBE':'INTERACTION_PROXY';
  state.db=await openDB();
  if('serviceWorker'in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
  if(navigator.storage?.persist) navigator.storage.persist().catch(()=>{});
@@ -574,7 +575,7 @@ function observeHumanAction(event){
  recordEvent('hat_action',{step:currentJourneyStep(),control:humanControlKey(el),dwellMs:Math.max(0,Date.now()-state.hatEnteredAt)}).catch(()=>{});
 }
 async function humanAttentionSummary(){
- const events=(await getAll('events')).filter(e=>String(e.type||'').startsWith('hat_')).sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+ const events=(await getAll('events')).filter(e=>String(e.type||'').startsWith('hat_')&&e.hatSessionId===state.hatSessionId).sort((a,b)=>(a.hatSequence||0)-(b.hatSequence||0));
  const dwellByStep={},actions={},enters=[];let backtracks=0;
  for(const e of events){
   if(e.type==='hat_state_exit'&&e.step)dwellByStep[e.step]=(dwellByStep[e.step]||0)+Math.max(0,Number(e.dwellMs)||0);
@@ -583,7 +584,7 @@ async function humanAttentionSummary(){
  }
  const slowestStep=Object.entries(dwellByStep).sort((a,b)=>b[1]-a[1])[0]||null;
  const repeatedActions=Object.entries(actions).filter(([,n])=>n>1).sort((a,b)=>b[1]-a[1]);
- return {schema:'field-report.human-attention-summary/v0',eventCount:events.length,dwellByStep,slowestStep:slowestStep?{step:slowestStep[0],dwellMs:slowestStep[1]}:null,backtrackCount:backtracks,repeatedActions:repeatedActions.map(([control,count])=>({control,count})),currentStep:currentJourneyStep(),mutationAuthority:'NONE',privacy:'control-keys-only; no typed report text or site/place labels'};
+ return {schema:'field-report.human-attention-summary/v0',eventCount:events.length,dwellByStep,slowestStep:slowestStep?{step:slowestStep[0],dwellMs:slowestStep[1]}:null,backtrackCount:backtracks,repeatedActions:repeatedActions.map(([control,count])=>({control,count})),currentStep:currentJourneyStep(),observationKind:state.hatOrigin,mutationAuthority:'NONE',privacy:'control-keys-only; no typed report text or site/place labels'};
 }
 
 function renderSites(){getAll('sites').then(sites=>{$('#siteList').innerHTML='';sites.filter(s=>!s.placeholder).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).forEach(s=>{const b=document.createElement('button');b.type='button';b.className='site-choice';b.innerHTML=`<strong>${esc(s.placeholder?'現場未設定':s.name)}</strong><small>覚えている場所 ${s.places.length}件</small>`;b.onclick=()=>selectSite(s.id);$('#siteList').append(b)});if(!sites.some(s=>!s.placeholder))$('#siteList').innerHTML='<p class="empty">保存済みの現場はまだありません。</p>'})}
@@ -651,7 +652,7 @@ function setStatus(s){$('#status').textContent=s}
 async function runSelfTest(){
  // Shutter first: no site setup is allowed to block evidence capture.
  if(withSiteSeed({name:'ハイム大川',address:''}).address!=='東京都渋谷区本町6-1-22 ハイム大川103')throw new Error('site KV seed failed');
- const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'library'});if(state.photos[0].captureSource!=='library')throw new Error('safe import source failed');if(!$('#journeyRail')||!$('#journeyPrimaryAction')||JOURNEY_ORDER.length!==5)throw new Error('human journey rail missing');const hat0=await humanAttentionSummary();if(hat0.mutationAuthority!=='NONE'||!hat0.privacy.includes('control-keys-only'))throw new Error('HAT privacy/authority contract failed');
+ const pixel=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAAwAAf4CBmUAAAAASUVORK5CYII='),c=>c.charCodeAt(0));const first=new File([pixel],'selftest-a.png',{type:'image/png'});await captureFiles([first],{source:'library'});if(state.photos[0].captureSource!=='library')throw new Error('safe import source failed');if(!$('#journeyRail')||!$('#journeyPrimaryAction')||JOURNEY_ORDER.length!==5)throw new Error('human journey rail missing');const hat0=await humanAttentionSummary();if(hat0.mutationAuthority!=='NONE'||!hat0.privacy.includes('control-keys-only'))throw new Error('HAT privacy/authority contract failed');if(hat0.observationKind!=='SYNTHETIC_SELFTEST')throw new Error('HAT synthetic provenance failed');
  if(!state.site?.placeholder||state.photos.length!==1||!isUnresolved(state.photos[0]))throw new Error('shutter-first failed');
  const originalSiteId=state.site.id;state.site={...state.site,name:'SELFTEST現場',placeholder:false,updatedAt:isoNow()};await put('sites',state.site);if(state.site.id!==originalSiteId)throw new Error('site identity changed while naming');
  const place={id:uuid(),path:['1F','厨房'],createdAt:isoNow()};state.site.places.push(place);await put('sites',state.site);state.activePlace=place;state.activeStage='施工前';

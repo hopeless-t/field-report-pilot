@@ -1,4 +1,4 @@
-const CACHE='field-report-pilot-v19';
+const CACHE='field-report-pilot-v20';
 const ASSETS=['./','index.html','style.css','app.js','manifest.webmanifest','manual.html'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([
