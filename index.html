@@ -33,6 +33,14 @@
       </div>
     </header>
 
+    <section id="visitRecovery" class="visit-recovery" hidden>
+      <p id="visitRecoverySummary">保存済みの訪問を確認できます。</p>
+      <div class="visit-recovery-actions">
+        <button id="visitHistoryButton" class="secondary" type="button">訪問履歴・写真を確認</button>
+        <button id="newVisitButton" class="ghost" type="button">新しい作業を開始</button>
+      </div>
+    </section>
+
     <section id="journeyRail" class="journey-rail" aria-live="polite">
       <div class="journey-heading">
         <div>
@@ -159,12 +167,12 @@
       <div id="reportPreview" class="report-preview"></div>
       <div class="report-actions">
         <button id="editReportMetaButton" class="secondary report-edit-main" type="button">報告書情報を編集</button>
-        <button id="shareEditableHTMLButton" class="secondary report-edit-main" type="button">PCで編集（HTML）</button>
+        <button id="shareEditableHTMLButton" class="secondary report-edit-main" type="button">PCで仕上げる（写真追加も可能）</button>
         <button id="savePhotosButton" class="secondary report-edit-main" type="button">写真アプリへ保存</button>
         <button id="shareReportButton" class="primary" type="button">PDFを共有</button>
         <button id="printReportButton" class="secondary" type="button">PDFを保存</button>
         <button id="printOnlyButton" class="ghost" type="button">プリント</button>
-        <p class="report-hint">iPhoneで完結するならPDF。PCでじっくり仕上げるなら「PCで編集（HTML）」。撮影した写真を写真アプリにも残す時は「写真アプリへ保存」→共有メニューの「画像を保存」を1回押します。</p>
+        <p class="report-hint">PC仕上げ用HTMLなら後日PCで写真追加・場所名の一括変更・文章修正・PDF化ができます。以前のHTMLも <a href="pc-upgrade.html" target="_blank" rel="noopener">新編集形式へ引き継ぐ</a> ことができます。PC編集内容はiPhone側へ自動同期されません。</p>
       </div>
     </div>
   </dialog>
@@ -178,6 +186,15 @@
         <li>右上の「追加」を押す</li>
       </ol>
       <p class="hint">次からはホーム画面の「Field REPORT」から、そのままアプリのように開けます。</p>
+    </div>
+  </dialog>
+
+  <dialog id="visitHistoryDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>この現場の過去の作業</h2><button id="closeVisitHistoryButton" class="ghost" type="button">閉じる</button></div>
+      <p class="hint">訪問を選ぶと、その日に保存した写真と報告内容を読み込みます。見るだけでは写真は削除されません。</p>
+      <div id="visitHistoryList" class="visit-history-list"></div>
+      <button id="historyNewVisitButton" class="secondary" type="button">今日の新しい作業を開始</button>
     </div>
   </dialog>
 

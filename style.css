@@ -91,3 +91,6 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 .hero h1{overflow-wrap:anywhere;word-break:normal}
 .hero-actions{flex-shrink:0}
 @media(max-width:390px){.hero-actions{max-width:126px}.hero h1{font-size:clamp(24px,7vw,32px)}.journey-steps{min-width:0}.journey-steps span{min-width:0}}
+
+/* Non-destructive visit recovery */
+.visit-recovery{padding:14px 16px;background:#e9f3ef;border:1px solid #9aaf9d;border-radius:15px;margin:4px 0 12px}.visit-recovery[hidden]{display:none!important}.visit-recovery-alert{background:#fff0d2;border-color:#bf8f47}.visit-recovery p{margin:0 0 10px;font-size:13px;font-weight:700}.visit-recovery-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.visit-recovery-actions button{padding:11px 8px;font-size:12px}.visit-history-list{display:grid;gap:8px;margin-bottom:16px}.visit-history-choice{display:block;width:100%;border:1px solid #c6c6c2;background:#f6f6f2;color:#191a17;padding:14px;border-radius:12px;text-align:left;font:inherit;font-weight:750;min-height:48px}@media(max-width:350px){.visit-recovery-actions{grid-template-columns:1fr}}

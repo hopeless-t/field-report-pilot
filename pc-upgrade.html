@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>旧PC編集HTMLの引き継ぎ | Field REPORT</title>
+<style>
+*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:#f4f4ef;color:#171815;margin:0;padding:24px;line-height:1.7}.wrap{max-width:700px;margin:12px auto}.card{background:#fff;padding:24px;border:1px solid #ddd;border-radius:18px;box-shadow:0 5px 25px #00000008}.eyebrow{font-size:12px;letter-spacing:.1em;font-weight:800}h1{font-size:26px;line-height:1.3}.steps{padding-left:22px}input{display:block;max-width:100%;width:100%;margin:12px 0;padding:12px;border:1px solid #bbb;border-radius:8px}button{border:0;background:#1b2419;color:white;padding:14px 20px;border-radius:10px;font-size:16px;font-weight:750;cursor:pointer;min-height:48px}button:disabled{opacity:.6}#message{margin:15px 0;font-weight:750}a{color:#2b5734}
+</style>
+</head>
+<body><main class="wrap"><div class="card">
+<p class="eyebrow">FIELD REPORT / OFFICE RECOVERY</p><h1>以前のPC編集用HTMLを新しい編集形式へ</h1>
+<p>以前保存したField REPORTのHTMLが手元にある場合、現場のiPhoneに戻らず、<strong>写真追加・場所名の一括修正ができる新しいHTML</strong>に変換できます。</p>
+<ol class="steps"><li>以前の「Field-REPORT-…PC編集.html」を選ぶ</li><li>「新しい編集用HTMLを保存」を押す</li><li>ダウンロードしたHTMLをPCのブラウザで開く</li></ol>
+<p><strong>ファイルはこのブラウザの中だけで読み取ります。</strong>現場写真や報告書はサーバーに送信しません。元のHTMLは変更しません。</p>
+<label for="source">以前のPC編集用HTML<input type="file" id="source" accept=".html,text/html"></label>
+<button id="upgradeButton" type="button">新しい編集用HTMLを保存</button>
+<p id="message" role="status">旧ファイルを選択してください。</p>
+<p><a href="./">Field REPORTに戻る</a> ・ <a href="manual.html">使い方マニュアル</a></p>
+</div></main>
+<script type="module">
+import {editableReportHTML} from './pc-bundle.js';
+const $=s=>document.querySelector(s),message=txt=>{$('#message').textContent=txt};
+$('#upgradeButton').onclick=async()=>{
+ const file=$('#source').files?.[0];if(!file)return message('旧HTMLファイルを選んでください');
+ if(file.size>180*1024*1024)return message('180MBを超えるファイルはこの変換画面では処理できません');
+ $('#upgradeButton').disabled=true;
+ try{
+  const input=await file.text();
+  const doc=new DOMParser().parseFromString(input,'text/html');
+  const report=doc.querySelector('.report-document');
+  const originalStyle=[...doc.querySelectorAll('head style')].find(el=>el.id!=='pcEditStyle');
+  if(!report||!report.querySelector('.report-cover')||!report.querySelector('.report-body')||!originalStyle)throw Error('Field REPORTの編集用HTMLを確認できませんでした');
+  if(/@import\b|url\s*\(|expression\s*\(/i.test(originalStyle.textContent))throw Error('読み込めない外部参照が含まれています');
+  const disallowed=report.querySelector('script,iframe,object,embed,form,link,meta,video,audio,svg');
+  if(disallowed)throw Error('対応していない埋め込み要素があります');
+  for(const element of [report,...report.querySelectorAll('*')]){
+   for(const attr of [...element.attributes]){
+    if(/^on/i.test(attr.name)||['srcdoc','formaction'].includes(attr.name))element.removeAttribute(attr.name);
+   }
+  }
+  for(const img of report.querySelectorAll('img')){
+   const src=img.getAttribute('src')||'';
+   if(!/^data:image\/(png|jpeg|webp|gif|heic|heif|avif);base64,/i.test(src))throw Error('画像がHTMLに埋め込まれていません。元ファイルを確認してください');
+  }
+  report.querySelectorAll('.pc-dynamic-control,.report-edit-control').forEach(el=>el.remove());
+  report.querySelectorAll('[contenteditable]').forEach(el=>el.removeAttribute('contenteditable'));
+  const title=doc.title||'Field REPORT';
+  const sanitizedTitle=title.replace(/[<>"']/g,' ').slice(0,140);
+  const base='<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+sanitizedTitle+'</title><style>'+originalStyle.textContent+'</style></head><body>'+report.outerHTML+'</body></html>';
+  const upgraded=await editableReportHTML({html:base});
+  const blob=new Blob([upgraded],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=file.name.replace(/\.html$/i,'')+'-新PC編集版.html';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  message('新PC編集用HTMLの保存を要求しました。ダウンロードしたファイルで写真追加・場所名変更ができます。');
+ }catch(error){message('変換できませんでした：'+String(error.message||error).slice(0,200))}
+ finally{$('#upgradeButton').disabled=false}
+};
+</script>
+</body></html>
