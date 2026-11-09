@@ -202,11 +202,34 @@
   <dialog id="siteDialog">
     <form method="dialog" class="dialog-body" id="siteForm">
       <div class="dialog-head"><h2>現場を開く</h2><button value="cancel" class="ghost">閉じる</button></div>
+      <p id="siteListMessage" class="hint" role="status">試しに登録した現場は「編集・削除」から整理できます。</p>
       <div id="siteList" class="stack"></div>
+      <details id="archivedSiteSection" class="site-recovery" hidden>
+        <summary>削除した現場（<span id="archivedSiteCount">0</span>件）を復元</summary>
+        <div id="archivedSiteList" class="stack"></div>
+      </details>
       <hr>
       <label>新しい現場名<input id="newSiteName" autocomplete="off" placeholder="例：六号通り店"></label>
       <button id="createSiteButton" type="button" class="primary">新しい現場として保存</button>
     </form>
+  </dialog>
+
+  <dialog id="siteManageDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>現場名の編集・削除</h2><button id="closeManageSiteButton" class="ghost" type="button">閉じる</button></div>
+      <label>現場名<input id="manageSiteName" autocomplete="off"></label>
+      <button id="saveManagedSiteNameButton" class="primary" type="button">現場名を保存</button>
+      <p id="siteManageImpact" class="hint"></p>
+      <button id="prepareSiteArchiveButton" class="ghost" type="button">一覧から削除（復元できます）</button>
+      <div id="siteArchiveConfirm" class="site-archive-confirm" hidden>
+        <p><strong>この現場を一覧から削除しますか？</strong> 写真・報告・訪問履歴は消しません。後から復元できます。</p>
+        <div class="site-archive-actions">
+          <button id="cancelSiteArchiveButton" class="secondary" type="button">やめる</button>
+          <button id="confirmSiteArchiveButton" class="ghost" type="button">削除する</button>
+        </div>
+      </div>
+      <p id="siteManageFeedback" role="status" class="status"></p>
+    </div>
   </dialog>
 
   <dialog id="placeRenameDialog">

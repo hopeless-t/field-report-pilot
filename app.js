@@ -2,7 +2,7 @@
 const DB_NAME='field-report-pilot-v1';
 const DB_VERSION=2;
 const $=s=>document.querySelector(s);
-const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false,hatStep:null,hatEnteredAt:Date.now(),hatSessionId:null,hatSequence:0,hatOrigin:'INTERACTION_PROXY',visitHistory:[],visitSwitchBusy:false,renamingPlaceId:null};
+const state={db:null,site:null,visit:null,activePlace:null,activeStage:'',activeWorkCategory:'ゴキブリトラップ',photos:[],resolvingPhotoId:null,editingPhotoId:null,pendingCoverPhoto:null,coverPreviewURL:null,coverThumbURL:null,showUnresolvedOnly:false,reportHTML:null,reportFilename:null,returnToReportAfterEdit:false,hatStep:null,hatEnteredAt:Date.now(),hatSessionId:null,hatSequence:0,hatOrigin:'INTERACTION_PROXY',visitHistory:[],visitSwitchBusy:false,renamingPlaceId:null,managingSiteId:null,siteManageBusy:false};
 
 const BUILTIN_PRESETS=[
  ['異常なし','異常は確認されませんでした'],
@@ -126,6 +126,7 @@ function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(D
 function tx(store,mode='readonly'){return state.db.transaction(store,mode).objectStore(store)}
 function put(store,val){return new Promise((res,rej)=>{const r=tx(store,'readwrite').put(val);r.onsuccess=()=>res(val);r.onerror=()=>rej(r.error)})}
 function getAll(store){return new Promise((res,rej)=>{const r=tx(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function getByKey(store,id){return new Promise((res,rej)=>{const r=tx(store).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 function getByIndex(store,index,key){return new Promise((res,rej)=>{const r=tx(store).index(index).getAll(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 function countByIndex(store,index,key){return new Promise((res,rej)=>{const r=tx(store).index(index).count(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 async function recordEvent(type,detail={}){if(!state.db)return;try{const hat=type.startsWith('hat_')?{hatSessionId:state.hatSessionId,hatOrigin:state.hatOrigin,hatSequence:++state.hatSequence}:{};await put('events',{id:uuid(),type,at:isoNow(),siteId:state.site?.id||null,visitId:state.visit?.id||null,...hat,...detail})}catch(e){console.warn('ledger event failed',type,e)}}
@@ -137,7 +138,7 @@ async function init(){
  if(navigator.storage?.persist) navigator.storage.persist().catch(()=>{});
  const sites=await getAll('sites');
  const last=localStorage.getItem('field-report-last-site');
- state.site=sites.find(s=>s.id===last)||null;
+ state.site=sites.find(s=>s.id===last&&!s.archivedAt)||null;
  if(state.site) await startOrResumeVisit(state.site);
  bind(); render();
 }
@@ -252,6 +253,11 @@ function bind(){
  $('#closePlaceRenameButton').onclick=()=>$('#placeRenameDialog').close();
  $('#moveButton').onclick=()=>clearActivePlace();
  $('#createSiteButton').onclick=createOrNameSite;
+ $('#closeManageSiteButton').onclick=()=>$('#siteManageDialog').close();
+ $('#saveManagedSiteNameButton').onclick=saveManagedSiteName;
+ $('#prepareSiteArchiveButton').onclick=()=>{$('#siteArchiveConfirm').hidden=false;$('#confirmSiteArchiveButton').focus()};
+ $('#cancelSiteArchiveButton').onclick=()=>{$('#siteArchiveConfirm').hidden=true};
+ $('#confirmSiteArchiveButton').onclick=archiveManagedSite;
  $('#createPlaceButton').onclick=createPlace;
  $('#photoImport').onchange=e=>captureFiles(e.target.files,{source:'library'});
  $('#unresolvedButton').onclick=toggleUnresolved;
@@ -380,7 +386,7 @@ async function createPlace(){
 }
 
 async function selectSite(id){
- const sites=await getAll('sites');const site=sites.find(s=>s.id===id);if(!site)return;
+ const sites=await getAll('sites');const site=sites.find(s=>s.id===id&&!s.archivedAt);if(!site)return;
  $('#siteDialog').close();
  // Capture-first reconciliation: if evidence was already recorded while the
  // site was UNKNOWN, keep that same visit and evidence. Record later site
@@ -645,7 +651,91 @@ async function humanAttentionSummary(){
  return {schema:'field-report.human-attention-summary/v0',eventCount:events.length,dwellByStep,slowestStep:slowestStep?{step:slowestStep[0],dwellMs:slowestStep[1]}:null,backtrackCount:backtracks,repeatedActions:repeatedActions.map(([control,count])=>({control,count})),currentStep:currentJourneyStep(),observationKind:state.hatOrigin,mutationAuthority:'NONE',privacy:'control-keys-only; no typed report text or site/place labels'};
 }
 
-function renderSites(){getAll('sites').then(sites=>{$('#siteList').innerHTML='';sites.filter(s=>!s.placeholder).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).forEach(s=>{const b=document.createElement('button');b.type='button';b.className='site-choice';b.innerHTML=`<strong>${esc(s.placeholder?'現場未設定':s.name)}</strong><small>覚えている場所 ${s.places.length}件</small>`;b.onclick=()=>selectSite(s.id);$('#siteList').append(b)});if(!sites.some(s=>!s.placeholder))$('#siteList').innerHTML='<p class="empty">保存済みの現場はまだありません。</p>'})}
+async function renderSites(){
+ const sites=await getAll('sites');
+ const active=sites.filter(s=>!s.placeholder&&!s.archivedAt).sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+ const archived=sites.filter(s=>!s.placeholder&&s.archivedAt).sort((a,b)=>String(b.archivedAt||'').localeCompare(String(a.archivedAt||'')));
+ const list=$('#siteList');list.replaceChildren();
+ for(const site of active){
+  const row=document.createElement('div');row.className='site-list-row';
+  const choose=document.createElement('button');choose.type='button';choose.className='site-choice';
+  const label=document.createElement('strong');label.textContent=site.name;
+  const meta=document.createElement('small');meta.textContent=`覚えている場所 ${(site.places||[]).length}件`;
+  choose.append(label,meta);choose.onclick=()=>selectSite(site.id);
+  const manage=document.createElement('button');manage.type='button';manage.className='ghost site-manage-choice';manage.textContent='編集・削除';
+  manage.setAttribute('aria-label',`${site.name}を編集・削除`);manage.onclick=()=>openSiteManager(site.id);
+  row.append(choose,manage);list.append(row);
+ }
+ if(!active.length){const p=document.createElement('p');p.className='empty';p.textContent='保存済みの現場はまだありません。';list.append(p)}
+ const recovery=$('#archivedSiteSection'),archivedList=$('#archivedSiteList');recovery.hidden=!archived.length;archivedList.replaceChildren();
+ $('#archivedSiteCount').textContent=String(archived.length);
+ for(const site of archived){
+  const row=document.createElement('div');row.className='site-list-row';
+  const label=document.createElement('span');label.className='archived-site-name';label.textContent=site.name;
+  const restore=document.createElement('button');restore.type='button';restore.className='secondary site-manage-choice';restore.textContent='元に戻す';
+  restore.setAttribute('aria-label',`${site.name}を元に戻す`);
+  restore.onclick=()=>restoreArchivedSite(site.id);row.append(label,restore);archivedList.append(row);
+ }
+}
+async function openSiteManager(id){
+ if(state.siteManageBusy)return;
+ const site=await getByKey('sites',id);if(!site||site.archivedAt)return;
+ state.managingSiteId=id;
+ const visits=(await getAll('visits')).filter(v=>v.siteId===id);
+ const photoCounts=await Promise.all(visits.map(v=>countByIndex('photos','visitId',v.id)));
+ $('#manageSiteName').value=site.name;
+ $('#siteManageImpact').textContent=`保存済み訪問 ${visits.length}件・写真 ${photoCounts.reduce((a,b)=>a+b,0)}枚。削除しても写真・報告・履歴は消さず、あとから現場を復元できます。`;
+ $('#siteManageFeedback').textContent='';$('#siteArchiveConfirm').hidden=true;$('#siteManageDialog').showModal();
+}
+async function saveManagedSiteName(){
+ const id=state.managingSiteId,name=$('#manageSiteName').value.trim();
+ if(!id||state.siteManageBusy)return;
+ if(!name){$('#siteManageFeedback').textContent='現場名を入力してください';return}
+ state.siteManageBusy=true;
+ try{
+  const site=await getByKey('sites',id);if(!site||site.archivedAt)throw Error('現場を確認できません');
+  const updated={...site,name,updatedAt:isoNow()};
+  await put('sites',updated);
+  const readback=await getByKey('sites',id);if(readback?.name!==name)throw Error('保存結果を確認できません');
+  if(state.site?.id===id)state.site=readback;
+  await recordEvent('site_name_corrected',{siteId:id});
+  $('#siteManageDialog').close();await renderSites();render();setStatus('現場名を修正しました。過去の撮影記録は書き換えていません。');
+  $('#siteListMessage').textContent='現場名を修正しました。';
+ }catch(e){console.error(e);$('#siteManageFeedback').textContent='修正を保存できませんでした。元の登録は保持されています。'}
+ finally{state.siteManageBusy=false}
+}
+async function archiveManagedSite(){
+ const id=state.managingSiteId;if(!id||state.siteManageBusy)return;
+ state.siteManageBusy=true;$('#confirmSiteArchiveButton').disabled=true;
+ try{
+  const site=await getByKey('sites',id);if(!site||site.archivedAt)throw Error('現場を確認できません');
+  const archivedAt=isoNow();await put('sites',{...site,archivedAt});
+  const readback=await getByKey('sites',id);if(readback?.archivedAt!==archivedAt)throw Error('保存結果を確認できません');
+  await recordEvent('site_archived',{siteId:id});
+  if(state.site?.id===id){
+   state.site=null;state.visit=null;state.photos=[];state.visitHistory=[];state.activePlace=null;state.activeStage='';state.activeWorkCategory='ゴキブリトラップ';
+   state.showUnresolvedOnly=false;state.pendingCoverPhoto=null;
+   if(localStorage.getItem('field-report-last-site')===id)localStorage.removeItem('field-report-last-site');
+  }
+  $('#siteManageDialog').close();await renderSites();render();
+  $('#siteListMessage').textContent=`「${site.name}」を一覧から削除しました。下の「削除した現場」から復元できます。`;
+  setStatus('現場を一覧から削除しました。写真・訪問記録は保持しています。');
+ }catch(e){console.error(e);$('#siteManageFeedback').textContent='削除処理を確認できませんでした。現場の状態を確認してください。'}
+ finally{state.siteManageBusy=false;$('#confirmSiteArchiveButton').disabled=false}
+}
+async function restoreArchivedSite(id){
+ if(state.siteManageBusy)return;state.siteManageBusy=true;
+ try{
+  const site=await getByKey('sites',id);if(!site?.archivedAt)throw Error('復元対象を確認できません');
+  const restored={...site};delete restored.archivedAt;restored.updatedAt=isoNow();
+  await put('sites',restored);
+  const readback=await getByKey('sites',id);if(!readback||readback.archivedAt)throw Error('復元結果を確認できません');
+  await recordEvent('site_restored',{siteId:id});await renderSites();
+  $('#siteListMessage').textContent=`「${site.name}」を元に戻しました。写真と訪問履歴もそのままです。`;
+  setStatus('現場を復元しました');
+ }catch(e){console.error(e);$('#siteListMessage').textContent='復元できませんでした。削除した現場の記録は保持されています。'}
+ finally{state.siteManageBusy=false}
+}
 function renderPlaces(){
  const root=$('#placeList');root.innerHTML='';
  if(!state.site){root.innerHTML='<p class="empty">場所はあとで決められます。まず撮影できます。</p>';return}

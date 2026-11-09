@@ -96,3 +96,18 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 .visit-recovery{padding:14px 16px;background:#e9f3ef;border:1px solid #9aaf9d;border-radius:15px;margin:4px 0 12px}.visit-recovery[hidden]{display:none!important}.visit-recovery-alert{background:#fff0d2;border-color:#bf8f47}.visit-recovery p{margin:0 0 10px;font-size:13px;font-weight:700}.visit-recovery-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.visit-recovery-actions button{padding:11px 8px;font-size:12px}.visit-history-list{display:grid;gap:8px;margin-bottom:16px}.visit-history-choice{display:block;width:100%;border:1px solid #c6c6c2;background:#f6f6f2;color:#191a17;padding:14px;border-radius:12px;text-align:left;font:inherit;font-weight:750;min-height:48px}@media(max-width:350px){.visit-recovery-actions{grid-template-columns:1fr}}
 
 .place-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;gap:7px;margin:8px 0}.place-list-row .place-choice{min-width:0;text-align:left}.place-rename-choice{font-size:12px;padding:9px;white-space:nowrap;min-height:44px}
+
+/* Reversible cleanup of trial site registrations. */
+.site-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch;min-width:0}
+.site-list-row .site-choice{min-width:0;text-align:left;overflow-wrap:anywhere}
+.site-list-row .site-choice strong,.site-list-row .site-choice small{display:block}
+.site-manage-choice{font-size:12px;min-height:48px;padding:9px 11px;max-width:112px}
+.archived-site-name{align-self:center;overflow-wrap:anywhere;font-weight:750;min-width:0}
+.site-recovery{margin-top:8px;border:1px solid #dedfd7;border-radius:12px;padding:12px}
+.site-recovery summary{cursor:pointer;font-weight:750}
+.site-recovery .stack{margin-top:12px}
+.site-archive-confirm{border:1px solid #b88b53;background:#fff8e9;border-radius:12px;padding:12px}
+.site-archive-confirm p{margin:0 0 12px;font-size:14px}
+.site-archive-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.site-archive-actions button{font-size:14px;padding:11px}
+#siteManageFeedback{margin:0}
