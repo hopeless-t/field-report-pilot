@@ -94,3 +94,5 @@ button.report-cover-missing{border:0;font:inherit;cursor:pointer}.report-cover-m
 
 /* Non-destructive visit recovery */
 .visit-recovery{padding:14px 16px;background:#e9f3ef;border:1px solid #9aaf9d;border-radius:15px;margin:4px 0 12px}.visit-recovery[hidden]{display:none!important}.visit-recovery-alert{background:#fff0d2;border-color:#bf8f47}.visit-recovery p{margin:0 0 10px;font-size:13px;font-weight:700}.visit-recovery-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.visit-recovery-actions button{padding:11px 8px;font-size:12px}.visit-history-list{display:grid;gap:8px;margin-bottom:16px}.visit-history-choice{display:block;width:100%;border:1px solid #c6c6c2;background:#f6f6f2;color:#191a17;padding:14px;border-radius:12px;text-align:left;font:inherit;font-weight:750;min-height:48px}@media(max-width:350px){.visit-recovery-actions{grid-template-columns:1fr}}
+
+.place-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;gap:7px;margin:8px 0}.place-list-row .place-choice{min-width:0;text-align:left}.place-rename-choice{font-size:12px;padding:9px;white-space:nowrap;min-height:44px}

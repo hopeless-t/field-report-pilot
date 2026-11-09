@@ -93,6 +93,7 @@
       <div id="quickPlaces" class="quick-places" aria-label="場所を直接切り替える"></div>
       <div class="row place-create-row">
         <button id="placeButton" class="secondary">＋ 場所</button>
+        <button id="renameActivePlaceButton" type="button" class="ghost" hidden>場所名を修正</button>
         <button id="moveButton" class="ghost" hidden>場所未設定にする</button>
       </div>
     </section>
@@ -208,6 +209,16 @@
     </form>
   </dialog>
 
+  <dialog id="placeRenameDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><h2>場所名をまとめて修正</h2><button id="closePlaceRenameButton" type="button" class="ghost">閉じる</button></div>
+      <p id="placeRenameSummary" class="hint">この場所の名前を修正し、同じ場所に紐づく写真へ反映します。</p>
+      <label>階・大きな場所<input id="renameFloorName" autocomplete="off" placeholder="例：1F"></label>
+      <label>場所名<input id="renamePlaceName" autocomplete="off" placeholder="例：厨房"></label>
+      <button id="savePlaceRenameButton" class="primary" type="button">この訪問の写真へ一括反映</button>
+    </div>
+  </dialog>
+
   <dialog id="placeDialog">
     <form method="dialog" class="dialog-body" id="placeForm">
       <div class="dialog-head"><h2 id="placeDialogTitle">いまどこ？</h2><button value="cancel" class="ghost">閉じる</button></div>
@@ -254,7 +265,7 @@
         <li><strong>現場を開く</strong>：前に使った現場なら選ぶだけ。</li>
         <li><strong>店舗外観</strong>：iPhone標準カメラで外観を撮ってから「🏠 外観を選ぶ」。原本は写真アプリに残り、これは作業写真には入りません。</li>
         <li><strong>施工工程</strong>：ゴキブリトラップ→ネズミ固形剤→ネズミ粉剤→衛生管理報告→特別報告の固定順。「次の施工へ」を1回押すだけ。</li>
-        <li><strong>場所</strong>：最初に1回選ぶ。移動するまでその場所を保持します。</li>
+        <li><strong>場所</strong>：最初に1回選ぶ。移動するまでその場所を保持します。間違えた場所名は「場所名を修正」で、この訪問の複数写真へまとめて反映できます（撮影時の記録は保持）。</li>
         <li><strong>施工前・作業中・施工後</strong>：最初に1回選ぶ。変わった時だけ押し直します。</li>
         <li><strong>撮影</strong>：必ずiPhone標準カメラで先に撮影し、写真アプリに原本を残してから「写真を選ぶ（原本保存済み）」で取り込みます。写真は古い順に上、新しい写真ほど下へ追加されます。</li>
         <li><strong>定型文</strong>：写真の「定型文・報告文を編集」→ワンタップ文を選ぶ。自由入力した文は「この文を定型文として保存」で次回から1タップ。</li>
